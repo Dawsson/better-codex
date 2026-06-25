@@ -775,6 +775,9 @@ struct CodexEntryRow: View {
                     CodeBlockView(text: entry.text)
                 }
 
+            case .diff:
+                DiffChangeView(entry: entry)
+
             case .error:
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -1130,29 +1133,56 @@ struct CommandOutputPreview: View {
 
     var body: some View {
         if !visibleLines.isEmpty {
-            HStack(alignment: .top, spacing: 8) {
-                Text("└")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary.opacity(0.65))
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    if hiddenCount > 0 {
-                        Text("… +\(hiddenCount) lines")
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.72))
-                    }
+                if hiddenCount > 0 {
+                    Text("… +\(hiddenCount) lines")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.72))
                 }
             }
-            .padding(.leading, 28)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.tertiarySystemBackground).opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
             .textSelection(.enabled)
         }
+    }
+}
+
+struct DiffChangeView: View {
+    @Bindable var entry: CodexEntry
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $entry.isExpanded) {
+            CodeBlockView(text: entry.detail.isEmpty ? entry.text : entry.detail, language: "diff")
+                .padding(.top, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(entry.title.isEmpty ? "Changes" : entry.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if !entry.text.isEmpty, entry.text != entry.detail {
+                    Text(entry.text)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .padding(.vertical, 3)
+        .tint(Color.secondary.opacity(0.58))
     }
 }
 

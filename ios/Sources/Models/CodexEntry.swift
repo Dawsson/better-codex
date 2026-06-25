@@ -139,6 +139,7 @@ enum CodexEntryKind: String {
     case status
     case error
     case tool
+    case diff
 }
 
 @Observable

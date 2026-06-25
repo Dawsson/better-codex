@@ -666,7 +666,11 @@ final class CodexConnection {
         case "item/commandExecution/requestApproval":
             sendResponse(id: id, result: ["decision": "accept"])
 
-        case "item/fileChange/requestApproval", "item/permissions/requestApproval":
+        case "item/fileChange/requestApproval":
+            appendFileChangeRequest(params, requestId: id)
+            sendResponse(id: id, result: ["decision": "accept"])
+
+        case "item/permissions/requestApproval":
             sendResponse(id: id, result: ["decision": "accept"])
 
         default:
@@ -805,9 +809,30 @@ final class CodexConnection {
             entry.detail = status
             transcriptRevision += 1
 
+        case "fileChange", "file_change", "patch", "diff":
+            endActiveExplorationGroup()
+            let entry = entriesByItemId[id] ?? append(.diff, title: fileChangeTitle(from: item), text: "", itemId: id)
+            entry.title = fileChangeTitle(from: item)
+            entry.text = fileChangeSummary(from: item)
+            entry.detail = diffText(from: item)
+            transcriptRevision += 1
+
         default:
-            break
+            if let display = genericDisplayText(from: item) {
+                endActiveExplorationGroup()
+                let entry = entriesByItemId[id] ?? append(.tool, title: type, text: "", itemId: id)
+                entry.title = type
+                entry.text = genericDisplaySummary(from: item)
+                entry.detail = display
+                transcriptRevision += 1
+            }
         }
+    }
+
+    private func appendFileChangeRequest(_ params: [String: Any], requestId: Int) {
+        let entry = append(.diff, title: fileChangeTitle(from: params), text: fileChangeSummary(from: params), itemId: "file-change-request-\(requestId)")
+        entry.detail = diffText(from: params)
+        entry.isExpanded = true
     }
 
     private func belongsToActiveThread(_ params: [String: Any]) -> Bool {
@@ -1038,6 +1063,56 @@ final class CodexConnection {
             return "\(remainingSeconds)s"
         }
         return "\(minutes)m \(remainingSeconds)s"
+    }
+
+    private func fileChangeTitle(from value: [String: Any]) -> String {
+        let path = stringValue(for: ["path", "file", "filePath", "target", "targetPath"], in: value)
+        guard let path, !path.isEmpty else { return "Changes" }
+        return URL(fileURLWithPath: path).lastPathComponent.isEmpty ? path : URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    private func fileChangeSummary(from value: [String: Any]) -> String {
+        if let path = stringValue(for: ["path", "file", "filePath", "target", "targetPath"], in: value) {
+            return path
+        }
+        if let action = stringValue(for: ["action", "operation", "status"], in: value) {
+            return action
+        }
+        return "File changes"
+    }
+
+    private func diffText(from value: [String: Any]) -> String {
+        if let diff = stringValue(for: ["diff", "patch", "unifiedDiff", "changes", "content", "text"], in: value), !diff.isEmpty {
+            return diff
+        }
+        if let files = value["files"] as? [[String: Any]] {
+            return files.map { file in
+                let title = fileChangeSummary(from: file)
+                let diff = diffText(from: file)
+                return diff.isEmpty ? title : "\(title)\n\(diff)"
+            }.joined(separator: "\n\n")
+        }
+        return String(describing: value)
+    }
+
+    private func genericDisplaySummary(from item: [String: Any]) -> String {
+        stringValue(for: ["title", "name", "tool", "status"], in: item) ?? "Item"
+    }
+
+    private func genericDisplayText(from item: [String: Any]) -> String? {
+        stringValue(for: ["detail", "text", "content", "message", "summary"], in: item)
+    }
+
+    private func stringValue(for keys: [String], in value: [String: Any]) -> String? {
+        for key in keys {
+            if let string = value[key] as? String, !string.isEmpty {
+                return string
+            }
+            if let strings = value[key] as? [String], !strings.isEmpty {
+                return strings.joined(separator: "\n")
+            }
+        }
+        return nil
     }
 
     private func updateThreadStatus(_ threadId: String, status: String) {
