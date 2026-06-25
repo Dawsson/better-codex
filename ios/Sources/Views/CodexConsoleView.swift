@@ -383,7 +383,7 @@ struct CodexThreadDetailView: View {
                     }
 
                     ForEach(codex.entries) { entry in
-                        CodexEntryRow(entry: entry)
+                        CodexEntryRow(entry: entry, revision: codex.transcriptRevision)
                             .id(entry.id)
                     }
 
@@ -734,8 +734,11 @@ struct PendingInputBar: View {
 
 struct CodexEntryRow: View {
     let entry: CodexEntry
+    let revision: Int
 
     var body: some View {
+        let _ = revision
+
         Group {
             switch entry.kind {
             case .user:
