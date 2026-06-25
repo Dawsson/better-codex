@@ -20,6 +20,7 @@ final class CodexConnection {
     var isWorking = false
     var isLoadingThreads = false
     var isLoadingThread = false
+    var transcriptRevision = 0
 
     var isConnected: Bool { connectionState == .connected }
 
@@ -29,6 +30,7 @@ final class CodexConnection {
     private var requestKinds: [Int: String] = [:]
     private var activeThreadId: String?
     private var activeTurnId: String?
+    private var activeTurnStartedAt: Date?
     private var entriesByItemId: [String: CodexEntry] = [:]
     private var loadingAgentIds: Set<String> = []
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
@@ -82,6 +84,7 @@ final class CodexConnection {
         shouldAutoReconnect = false
         closeSocket()
         activeTurnId = nil
+        activeTurnStartedAt = nil
         pendingInput = nil
         isWorking = false
         isLoadingThreads = false
@@ -140,6 +143,7 @@ final class CodexConnection {
         activeThreadId = thread.id
         entries.removeAll()
         entriesByItemId.removeAll()
+        transcriptRevision += 1
         isLoadingThread = true
         pendingInput = nil
         sendRequest(
@@ -414,6 +418,7 @@ final class CodexConnection {
 
         case "turn/started":
             isWorking = true
+            activeTurnStartedAt = Date()
             if let threadId = params["threadId"] as? String {
                 activeThreadId = threadId
                 updateThreadStatus(threadId, status: "active")
@@ -426,7 +431,10 @@ final class CodexConnection {
         case "turn/completed":
             isWorking = false
             activeTurnId = nil
-            append(.status, title: "Done", text: "")
+            if let activeTurnStartedAt {
+                append(.status, title: "Worked for \(Self.durationString(from: activeTurnStartedAt, to: Date()))", text: "")
+            }
+            activeTurnStartedAt = nil
             refreshThreads()
 
         case "item/started":
@@ -445,13 +453,19 @@ final class CodexConnection {
                   let delta = params["delta"] as? String else { return }
             let entry = entriesByItemId[itemId] ?? append(.assistant, title: "Codex", text: "", itemId: itemId)
             entry.text += delta
+            transcriptRevision += 1
 
         case "item/commandExecution/outputDelta":
             guard belongsToActiveThread(params),
                   let itemId = params["itemId"] as? String,
                   let delta = params["delta"] as? String else { return }
             let entry = entriesByItemId["output-\(itemId)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(itemId)")
-            entry.text += delta
+            if let commandEntry = entriesByItemId[itemId], commandEntry.kind == .command {
+                commandEntry.detail += delta
+            } else {
+                entry.text += delta
+            }
+            transcriptRevision += 1
 
         case "warning", "guardianWarning", "configWarning", "error":
             append(.error, title: method, text: String(describing: params))
@@ -488,6 +502,7 @@ final class CodexConnection {
     private func loadHistory(from thread: [String: Any]) {
         entries.removeAll()
         entriesByItemId.removeAll()
+        transcriptRevision += 1
         let turns = thread["turns"] as? [[String: Any]] ?? []
         for turn in turns {
             let items = turn["items"] as? [[String: Any]] ?? []
@@ -505,6 +520,7 @@ final class CodexConnection {
         activeThreadId = thread.id
         entries.removeAll()
         entriesByItemId.removeAll()
+        transcriptRevision += 1
         isLoadingThread = false
         pendingInput = nil
     }
@@ -556,39 +572,46 @@ final class CodexConnection {
             guard !text.isEmpty else { return }
             let entry = entriesByItemId[id] ?? append(.user, title: "You", text: "", itemId: id)
             entry.text = text
+            transcriptRevision += 1
 
         case "agentMessage":
             let text = item["text"] as? String ?? ""
             let entry = entriesByItemId[id] ?? append(.assistant, title: "Codex", text: "", itemId: id)
             if !text.isEmpty { entry.text = text }
+            transcriptRevision += 1
 
         case "commandExecution":
             let command = item["command"] as? String ?? ""
             let status = item["status"].map { String(describing: $0) } ?? (completed ? "completed" : "running")
             let entry = entriesByItemId[id] ?? append(.command, title: "Command", text: command, itemId: id)
-            entry.title = "Command \(status)"
+            entry.title = status
+            entry.text = command
             if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
-                let outputEntry = entriesByItemId["output-\(id)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(id)")
-                outputEntry.text = output
+                entry.detail = output
             }
+            transcriptRevision += 1
 
         case "plan":
             let text = item["text"] as? String ?? ""
             let entry = entriesByItemId[id] ?? append(.assistant, title: "Plan", text: "", itemId: id)
             entry.text = text
+            transcriptRevision += 1
 
         case "reasoning":
             if let summary = item["summary"] as? [String], !summary.isEmpty {
                 let entry = entriesByItemId[id] ?? append(.status, title: "Reasoning", text: "", itemId: id)
                 entry.text = summary.joined(separator: "\n")
+                transcriptRevision += 1
             }
 
         case "mcpToolCall":
             let server = item["server"] as? String ?? "MCP"
             let tool = item["tool"] as? String ?? "tool"
             let status = item["status"].map { String(describing: $0) } ?? ""
-            let entry = entriesByItemId[id] ?? append(.command, title: server, text: tool, itemId: id)
-            entry.text = "\(tool)\n\(status)"
+            let entry = entriesByItemId[id] ?? append(.tool, title: server, text: tool, itemId: id)
+            entry.text = tool
+            entry.detail = status
+            transcriptRevision += 1
 
         default:
             break
@@ -598,6 +621,16 @@ final class CodexConnection {
     private func belongsToActiveThread(_ params: [String: Any]) -> Bool {
         guard let threadId = params["threadId"] as? String else { return true }
         return activeThreadId == nil || activeThreadId == threadId
+    }
+
+    private static func durationString(from start: Date, to end: Date) -> String {
+        let seconds = max(1, Int(end.timeIntervalSince(start)))
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        if minutes == 0 {
+            return "\(remainingSeconds)s"
+        }
+        return "\(minutes)m \(remainingSeconds)s"
     }
 
     private func updateThreadStatus(_ threadId: String, status: String) {
@@ -659,6 +692,7 @@ final class CodexConnection {
         if let itemId {
             entriesByItemId[itemId] = entry
         }
+        transcriptRevision += 1
         return entry
     }
 

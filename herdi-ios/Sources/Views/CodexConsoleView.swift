@@ -31,33 +31,39 @@ struct CodexThreadListView: View {
     var body: some View {
         List {
             if !codex.isConnected || codex.lastError != nil {
-                Section {
-                    connectionRow
-                }
+                connectionRow
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
 
-            Section {
-                if codex.isLoadingThreads && codex.threads.isEmpty {
-                    HStack {
-                        ProgressView()
-                        Text("Loading agents")
-                            .foregroundStyle(.secondary)
+            if codex.isLoadingThreads && codex.threads.isEmpty {
+                HStack {
+                    ProgressView()
+                    Text("Loading agents")
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else if codex.threads.isEmpty {
+                ContentUnavailableView(
+                    codex.isConnected ? "No open agents" : "Connect to Codex",
+                    systemImage: codex.isConnected ? "text.bubble" : "antenna.radiowaves.left.and.right",
+                    description: Text(codex.isConnected ? "Start one from your phone or open a cx session on the Mac." : "Add the app-server token in Settings.")
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else {
+                ForEach(codex.threads) { thread in
+                    NavigationLink(value: thread) {
+                        CodexThreadRow(thread: thread)
                     }
-                } else if codex.threads.isEmpty {
-                    ContentUnavailableView(
-                        codex.isConnected ? "No open agents" : "Connect to Codex",
-                        systemImage: codex.isConnected ? "text.bubble" : "antenna.radiowaves.left.and.right",
-                        description: Text(codex.isConnected ? "Start one from your phone or open a cx session on the Mac." : "Add the app-server token in Settings.")
-                    )
-                } else {
-                    ForEach(codex.threads) { thread in
-                        NavigationLink(value: thread) {
-                            CodexThreadRow(thread: thread)
-                        }
-                    }
+                    .listRowBackground(Color.clear)
                 }
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemBackground))
         .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -270,11 +276,11 @@ struct CodexThreadDetailView: View {
     @Environment(CodexConnection.self) private var codex
     let thread: CodexThreadSummary
     @State private var prompt = ""
+    @State private var isNearBottom = true
 
     var body: some View {
         VStack(spacing: 0) {
             transcript
-            Divider()
             composer
         }
         .navigationTitle(thread.title)
@@ -306,7 +312,7 @@ struct CodexThreadDetailView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if codex.isLoadingThread && codex.entries.isEmpty {
                         ProgressView("Loading transcript")
                             .frame(maxWidth: .infinity, minHeight: 300)
@@ -323,13 +329,23 @@ struct CodexThreadDetailView: View {
                         CodexEntryRow(entry: entry)
                             .id(entry.id)
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("transcript-bottom")
+                        .onAppear { isNearBottom = true }
+                        .onDisappear { isNearBottom = false }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
             }
-            .background(Color(.systemGroupedBackground))
-            .onChange(of: codex.entries.count) { _, _ in
-                scrollToBottom(proxy)
+            .background(Color(.systemBackground))
+            .onChange(of: codex.transcriptRevision) { _, _ in
+                guard isNearBottom else { return }
+                scrollToBottom(proxy, animated: false)
+            }
+            .onAppear {
+                scrollToBottom(proxy, animated: false)
             }
         }
     }
@@ -338,7 +354,9 @@ struct CodexThreadDetailView: View {
         HStack(alignment: .bottom, spacing: 10) {
             TextField("Message Codex", text: $prompt, axis: .vertical)
                 .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 21))
                 .disabled(!codex.isConnected)
 
             Button {
@@ -346,20 +364,32 @@ struct CodexThreadDetailView: View {
                 prompt = ""
                 codex.sendPrompt(text)
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 32))
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
             }
-            .disabled(!codex.isConnected || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(!canSend)
             .accessibilityLabel("Send")
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .background(.regularMaterial)
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard let last = codex.entries.last else { return }
-        withAnimation(.snappy(duration: 0.2)) {
-            proxy.scrollTo(last.id, anchor: .bottom)
+    private var canSend: Bool {
+        codex.isConnected && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let action = {
+            proxy.scrollTo("transcript-bottom", anchor: .bottom)
+        }
+        if animated {
+            withAnimation(.snappy(duration: 0.2), action)
+        } else {
+            action()
         }
     }
 }
@@ -369,20 +399,37 @@ struct PendingInputBar: View {
     @Bindable var codex: CodexConnection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(pending.prompt)
                 .font(.footnote.weight(.medium))
-            HStack {
+                .foregroundStyle(.primary)
+
+            HStack(alignment: .bottom, spacing: 10) {
                 TextField("Response", text: $codex.inputAnswer)
-                    .textFieldStyle(.roundedBorder)
-                Button("Send") {
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 21))
+
+                Button {
                     codex.answerPendingInput(codex.inputAnswer)
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
                 }
-                .disabled(codex.inputAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
+                .accessibilityLabel("Send response")
             }
         }
-        .padding(12)
-        .background(.ultraThickMaterial)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+    }
+
+    private var canSend: Bool {
+        !codex.inputAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -390,69 +437,285 @@ struct CodexEntryRow: View {
     let entry: CodexEntry
 
     var body: some View {
+        Group {
+            switch entry.kind {
+            case .user:
+                HStack {
+                    Spacer(minLength: 44)
+                    MarkdownText(entry.text, foregroundStyle: .white)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 9)
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                }
+
+            case .assistant:
+                MarkdownText(entry.text)
+
+            case .command:
+                CommandRunView(entry: entry)
+
+            case .tool:
+                ToolRunView(entry: entry)
+
+            case .status:
+                if entry.title.hasPrefix("Worked for") {
+                    WorkedDivider(title: entry.title)
+                } else if !entry.text.isEmpty {
+                    DisclosureGroup {
+                        MarkdownText(entry.text)
+                            .padding(.top, 6)
+                    } label: {
+                        Text(entry.title)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+            case .output:
+                if !entry.text.isEmpty {
+                    CodeBlockView(text: entry.text)
+                }
+
+            case .error:
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    MarkdownText(entry.text.isEmpty ? entry.title : entry.text, foregroundStyle: .red)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct CommandRunView: View {
+    @Bindable var entry: CodexEntry
+
+    var body: some View {
+        Group {
+            if entry.detail.isEmpty {
+                commandLabel
+            } else {
+                DisclosureGroup(isExpanded: $entry.isExpanded) {
+                    CodeBlockView(text: entry.detail)
+                        .padding(.top, 8)
+                } label: {
+                    commandLabel
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground).opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var commandLabel: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                Text(entry.title)
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.cyan)
+                Text("Command")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                if !entry.title.isEmpty {
+                    Text(entry.title)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            if !entry.text.isEmpty {
-                Text(entry.text)
-                    .font(font)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Text(entry.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .lineLimit(entry.isExpanded ? nil : 2)
+                .textSelection(.enabled)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+struct ToolRunView: View {
+    @Bindable var entry: CodexEntry
+
+    var body: some View {
+        Group {
+            if entry.detail.isEmpty {
+                toolLabel
+            } else {
+                DisclosureGroup(isExpanded: $entry.isExpanded) {
+                    MarkdownText(entry.detail)
+                        .padding(.top, 8)
+                } label: {
+                    toolLabel
+                }
             }
         }
-        .padding(10)
-        .background(background, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color(.secondarySystemBackground).opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var icon: String {
-        switch entry.kind {
-        case .user: "person.crop.circle"
-        case .assistant: "sparkles"
-        case .command: "terminal"
-        case .output: "text.alignleft"
-        case .status: "circle.dotted"
-        case .error: "exclamationmark.triangle"
+    private var toolLabel: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.cyan)
+            Text(entry.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(entry.text)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer()
         }
+        .contentShape(Rectangle())
+    }
+}
+
+struct WorkedDivider: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.28))
+                .frame(height: 1)
+            Text(title)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.28))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct MarkdownText: View {
+    let text: String
+    var foregroundStyle: Color = .primary
+
+    init(_ text: String, foregroundStyle: Color = .primary) {
+        self.text = text
+        self.foregroundStyle = foregroundStyle
     }
 
-    private var color: Color {
-        switch entry.kind {
-        case .user: .blue
-        case .assistant: .green
-        case .command: .orange
-        case .output: .secondary
-        case .status: .secondary
-        case .error: .red
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(blocks.indices, id: \.self) { index in
+                switch blocks[index] {
+                case .code(let code):
+                    CodeBlockView(text: code)
+                case .heading(let line):
+                    InlineMarkdownText(line)
+                        .font(.headline)
+                        .foregroundStyle(foregroundStyle)
+                case .bullet(let line):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        InlineMarkdownText(line)
+                            .foregroundStyle(foregroundStyle)
+                    }
+                case .paragraph(let line):
+                    InlineMarkdownText(line)
+                        .foregroundStyle(foregroundStyle)
+                }
+            }
         }
+        .font(.body)
+        .textSelection(.enabled)
     }
 
-    private var background: AnyShapeStyle {
-        switch entry.kind {
-        case .user:
-            AnyShapeStyle(Color.blue.opacity(0.14))
-        case .error:
-            AnyShapeStyle(Color.red.opacity(0.14))
-        case .command, .output:
-            AnyShapeStyle(Color.secondary.opacity(0.12))
-        default:
-            AnyShapeStyle(Color.secondary.opacity(0.08))
+    private var blocks: [MarkdownBlock] {
+        var result: [MarkdownBlock] = []
+        var codeLines: [String] = []
+        var isInCodeBlock = false
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") {
+                if isInCodeBlock {
+                    result.append(.code(codeLines.joined(separator: "\n")))
+                    codeLines.removeAll()
+                }
+                isInCodeBlock.toggle()
+                continue
+            }
+
+            if isInCodeBlock {
+                codeLines.append(rawLine)
+            } else if line.isEmpty {
+                continue
+            } else if line.hasPrefix("### ") {
+                result.append(.heading(String(line.dropFirst(4))))
+            } else if line.hasPrefix("## ") {
+                result.append(.heading(String(line.dropFirst(3))))
+            } else if line.hasPrefix("# ") {
+                result.append(.heading(String(line.dropFirst(2))))
+            } else if line.hasPrefix("- ") {
+                result.append(.bullet(String(line.dropFirst(2))))
+            } else {
+                result.append(.paragraph(rawLine))
+            }
         }
+
+        if !codeLines.isEmpty {
+            result.append(.code(codeLines.joined(separator: "\n")))
+        }
+        return result
+    }
+}
+
+enum MarkdownBlock {
+    case paragraph(String)
+    case heading(String)
+    case bullet(String)
+    case code(String)
+}
+
+struct InlineMarkdownText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
     }
 
-    private var font: Font {
-        switch entry.kind {
-        case .command, .output:
-            .system(.caption, design: .monospaced)
-        default:
-            .body
+    var body: some View {
+        composed
+    }
+
+    private var composed: Text {
+        let parts = text.split(separator: "`", omittingEmptySubsequences: false).map(String.init)
+        return parts.indices.reduce(Text("")) { partial, index in
+            let part = parts[index]
+            guard !part.isEmpty else { return partial }
+            if index.isMultiple(of: 2) {
+                return partial + Text(part)
+            }
+            return partial + Text(part)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(.cyan)
         }
+    }
+}
+
+struct CodeBlockView: View {
+    let text: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .padding(10)
+        }
+        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

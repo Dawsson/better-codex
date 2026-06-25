@@ -130,6 +130,7 @@ enum CodexEntryKind: String {
     case output
     case status
     case error
+    case tool
 }
 
 @Observable
@@ -138,12 +139,23 @@ final class CodexEntry: Identifiable {
     var kind: CodexEntryKind
     var title: String
     var text: String
+    var detail: String
+    var isExpanded: Bool
 
-    init(id: String = UUID().uuidString, kind: CodexEntryKind, title: String, text: String) {
+    init(
+        id: String = UUID().uuidString,
+        kind: CodexEntryKind,
+        title: String,
+        text: String,
+        detail: String = "",
+        isExpanded: Bool = false
+    ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.text = text
+        self.detail = detail
+        self.isExpanded = isExpanded
     }
 }
 
