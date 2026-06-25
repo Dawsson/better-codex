@@ -1,128 +1,50 @@
-# herdr-remote
+# Better Codex
 
-Mobile & desktop interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent status, approve requests, and send responses from your phone, menu bar, terminal, or Telegram.
+Better Codex is a small native client for working with Codex agents from an
+iPhone or Mac. It connects to a Codex app-server over your private network,
+shows open agents, streams the chat transcript, and lets you send follow-up
+messages without jumping back to a terminal.
 
-## Architecture
+This is an early personal tool, but the goal is simple: make remote Codex
+sessions feel calm, readable, and useful on mobile.
 
-```
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌──────────┐
-│  iOS App    │  │  Mac Menu   │  │  TUI        │  │ Telegram │
-│  (SwiftUI)  │  │  Bar App    │  │  (Textual)  │  │ Bot      │
-└──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └────┬─────┘
-       │                 │                │               │
-       └────────────── WebSocket ─────────┴───────────────┘
-                         │
-              ┌──────────┴──────────┐
-              │   herdr-remote      │ :8375
-              │   relay             │ (WS + HTTP POST + UDP)
-              └──────────┬──────────┘
-                         │
-          ┌──────────────┼──────────────┐
-          │ CLI poll     │ herdr-push   │ SSH poll
-          │ (local)      │ (event push) │ (remote)
-          │              │              │
-       ┌──┴──┐     ┌────┴────┐    ┌────┴────┐
-       │herdr│     │herdr    │    │herdr    │
-       │local│     │(remote) │    │(remote) │
-       └─────┘     └─────────┘    └─────────┘
-```
+## What It Does
 
-## Install — macOS Menu Bar App
+- Lists open Codex agents with status, branch, and local work signals.
+- Opens an agent into a chat-like transcript.
+- Formats assistant Markdown, command runs, read/search exploration, and output
+  previews for small screens.
+- Sends new messages back to the active Codex session.
+- Works best over Tailscale with a Mac-hosted Codex app-server.
 
-Download the latest DMG from [Releases](https://github.com/dcolinmorgan/herdr-remote/releases), or build from source:
+## Layout
 
-```bash
-cd herdi-mac
-./build.sh
-cp -r dist/Herdi.app /Applications/
-open /Applications/Herdi.app
-```
+- `herdi-ios/` - SwiftUI iOS app.
+- `herdi-mac/` - macOS menu bar app experiments.
+- `relay/` and `web/` - older relay/web surfaces kept while the project moves
+  toward direct Codex app-server support.
 
-The app lives in your menu bar. Toggle "Launch at Login" in Settings.
+## Build The iOS App
 
-## Install — Terminal TUI
+Open `herdi-ios/Herdi.xcodeproj` in Xcode, select the `Herdi` scheme, and run it
+on your device.
 
-```bash
-pip install textual websockets
-python3 relay/herdr_tui.py
+For CLI builds against an iOS beta device:
 
-# Or split into a herdr pane:
-./relay/herdr-dash.sh
+```sh
+DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer" \
+  xcodebuild -scheme Herdi \
+  -project herdi-ios/Herdi.xcodeproj \
+  -configuration Debug \
+  -destination 'platform=iOS' \
+  build
 ```
 
-## Setup
+## Status
 
-### Relay (on your Mac)
+This is pre-release software. The iOS app is the active surface; older Herdr
+relay pieces are still present but are no longer the main direction.
 
-```bash
-cd relay
-uv run herdr_relay.py
-```
+## License
 
-### Remote Herdr Instances
-
-Monitor agents running on remote machines — no SSH required. Install the [herdr-push](https://github.com/dcolinmorgan/herdr-push) plugin on each machine:
-
-```bash
-# On the remote machine:
-herdr plugin install dcolinmorgan/herdr-push
-
-# Set your relay address:
-export HERDR_RELAY="wss://your-tunnel.trycloudflare.com"
-# or LAN: export HERDR_RELAY="http://192.168.1.x:8375"
-
-launchctl setenv HERDR_RELAY "$HERDR_RELAY"  # macOS
-herdr server reload-config
-```
-
-The plugin pushes status events via HTTP POST (zero deps, just curl) on every agent state change. No polling, no SSH, no inbound ports needed.
-
-#### Exposing the relay (no firewall changes needed)
-
-```bash
-# Quick tunnel (free, URL changes on restart):
-cloudflared tunnel --url http://localhost:8375
-
-# Or Tailscale Funnel:
-tailscale funnel 8375
-```
-
-#### Alternative: SSH polling
-
-```bash
-export HERDR_REMOTES="user@server1,user@server2"
-python3 relay/herdr_relay.py
-```
-
-### Telegram Bot
-
-```bash
-export HERDR_TG_TOKEN="your-token"
-export HERDR_TG_CHAT_ID="your-chat-id"
-python3 relay/herdr_telegram.py
-```
-
-When an agent blocks, you get a Telegram message with inline buttons:
-- **✅ Yes (once)** → `yes, single permission`
-- **🔓 Trust (always)** → `trust, always allow`
-- **❌ No** → `no (tab to edit)`
-
-Reply with free text to send a custom response.
-
-## LaunchAgent
-
-```bash
-cp relay/com.herdr-remote.relay.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdr-remote.relay.plist
-```
-
-## Features
-
-- Agent kanban board (Blocked → Working → Idle)
-- One-tap/click approval for blocked agents
-- Custom text responses
-- Auto-reconnect on network changes
-- Bonjour service discovery
-- Auto-update from GitHub releases
-- Push notifications (macOS + Telegram)
-- Local + remote agent monitoring
+No license has been selected yet.
