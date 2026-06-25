@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct CodexThreadSummary: Identifiable, Hashable {
+struct CodexThreadSummary: Codable, Identifiable, Hashable {
     let id: String
     var title: String
     var preview: String
@@ -77,26 +77,43 @@ struct CodexThreadSummary: Identifiable, Hashable {
     var statusLabel: String {
         switch status {
         case "active", "running", "in_progress":
-            "Working"
+            "working"
         case "done", "completed":
-            "Done"
+            "done"
         case "idle":
-            "Idle"
+            "idle"
         case "blocked", "waiting_for_input", "needs_input":
-            "Needs input"
+            "blocked"
         case "error", "failed":
-            "Error"
+            "error"
         default:
-            status.isEmpty ? "Unknown" : status.capitalized
+            status.isEmpty ? "unknown" : status
         }
     }
 
     var gitSummary: String? {
         guard let branch, !branch.isEmpty else { return nil }
         if let commitsToPush, commitsToPush > 0 {
-            return "\(branch) · \(commitsToPush) to push"
+            return "\(branch) +\(commitsToPush)"
         }
         return branch
+    }
+
+    var statusRank: Int {
+        switch status {
+        case "blocked", "waiting_for_input", "needs_input":
+            0
+        case "active", "running", "in_progress":
+            1
+        case "done", "completed":
+            2
+        case "idle":
+            3
+        case "error", "failed":
+            4
+        default:
+            5
+        }
     }
 }
 

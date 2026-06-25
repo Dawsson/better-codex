@@ -30,11 +30,13 @@ struct CodexThreadListView: View {
 
     var body: some View {
         List {
-            Section {
-                connectionRow
+            if !codex.isConnected || codex.lastError != nil {
+                Section {
+                    connectionRow
+                }
             }
 
-            Section("Open Agents") {
+            Section {
                 if codex.isLoadingThreads && codex.threads.isEmpty {
                     HStack {
                         ProgressView()
@@ -56,7 +58,7 @@ struct CodexThreadListView: View {
                 }
             }
         }
-        .navigationTitle("Better Codex")
+        .navigationTitle("Agents")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -68,6 +70,13 @@ struct CodexThreadListView: View {
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showSettings = true
+                } label: {
+                    connectionIndicator
+                }
+                .accessibilityLabel(connectionTitle)
+
                 Button {
                     codex.refreshThreads()
                 } label: {
@@ -91,24 +100,24 @@ struct CodexThreadListView: View {
     }
 
     private var connectionRow: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(connectionColor.opacity(0.16))
-                Image(systemName: connectionIcon)
-                    .font(.headline)
-                    .foregroundStyle(connectionColor)
-            }
-            .frame(width: 42, height: 42)
+        HStack(spacing: 10) {
+            connectionDot
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(connectionTitle)
-                    .font(.headline)
-                Text(codex.cwd)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .font(.subheadline.weight(.semibold))
+                if let lastError = codex.lastError {
+                    Text(lastError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text(codex.cwd)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
 
             Spacer()
@@ -123,6 +132,21 @@ struct CodexThreadListView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var connectionIndicator: some View {
+        ZStack {
+            Circle()
+                .fill(connectionColor.opacity(0.16))
+            connectionDot
+        }
+        .frame(width: 28, height: 28)
+    }
+
+    private var connectionDot: some View {
+        Circle()
+            .fill(connectionColor)
+            .frame(width: 9, height: 9)
     }
 
     private var connectionTitle: String {
@@ -165,52 +189,63 @@ struct CodexThreadRow: View {
     let thread: CodexThreadSummary
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 10, height: 10)
-                .padding(.top, 6)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Text(thread.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(thread.statusLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(thread.title)
+                    .font(.headline)
+                    .lineLimit(1)
 
-                HStack(spacing: 8) {
-                    Label(thread.projectName, systemImage: "folder")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
+                HStack(spacing: 7) {
                     if let gitSummary = thread.gitSummary {
                         Label(gitSummary, systemImage: "arrow.triangle.branch")
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else if !thread.projectName.isEmpty {
+                        Label(thread.projectName, systemImage: "folder")
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
 
-                    Spacer(minLength: 0)
+                    if !thread.model.isEmpty {
+                        Text(thread.model)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-                if !thread.preview.isEmpty {
-                    Text(thread.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                Text(thread.relativeTime)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
+
+            Spacer(minLength: 8)
+
+            Text(thread.statusLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(statusColor.opacity(0.14), in: Capsule())
+                .lineLimit(1)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        [
+            thread.title,
+            thread.statusLabel,
+            thread.gitSummary
+        ]
+        .compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        .joined(separator: ", ")
     }
 
     private var statusColor: Color {

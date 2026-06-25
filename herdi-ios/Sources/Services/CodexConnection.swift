@@ -5,6 +5,7 @@ import Observation
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
     static let defaultCwd = "/Users/dawson/projects/hosting-platform"
+    private static let cachedThreadsKey = "codex_cached_threads"
 
     var threads: [CodexThreadSummary] = []
     var selectedThread: CodexThreadSummary?
@@ -43,6 +44,7 @@ final class CodexConnection {
         serverURL = defaults.string(forKey: "codex_server_url") ?? Self.defaultServerURL
         bearerToken = defaults.string(forKey: "codex_bearer_token") ?? ""
         cwd = defaults.string(forKey: "codex_cwd") ?? Self.defaultCwd
+        threads = Self.loadCachedThreads(from: defaults)
     }
 
     func saveSettings() {
@@ -91,7 +93,6 @@ final class CodexConnection {
         loadingAgentOrder.removeAll()
         freshThreadIds.removeAll()
         if !keepState {
-            threads.removeAll()
             selectedThread = nil
             activeThreadId = nil
             entries.removeAll()
@@ -331,6 +332,7 @@ final class CodexConnection {
         switch kind {
         case "initialize":
             reconnectAttempt = 0
+            lastError = nil
             startPingLoop()
             connectionState = .connected
             refreshThreads()
@@ -339,6 +341,7 @@ final class CodexConnection {
             let ids = result["data"] as? [String] ?? []
             guard !ids.isEmpty else {
                 threads = []
+                saveCachedThreads()
                 isLoadingThreads = false
                 return
             }
@@ -358,6 +361,7 @@ final class CodexConnection {
                   let summary = CodexThreadSummary(json: thread) else { return }
             if !threads.contains(where: { $0.id == summary.id }) {
                 threads.append(summary)
+                saveCachedThreads()
             }
             freshThreadIds.insert(summary.id)
             selectFreshThread(summary)
@@ -388,12 +392,14 @@ final class CodexConnection {
                let summary = CodexThreadSummary(json: thread),
                !threads.contains(where: { $0.id == summary.id }) {
                 threads.append(summary)
+                saveCachedThreads()
             }
 
         case "thread/status/changed":
             guard let threadId = params["threadId"] as? String else { return }
             if let index = threads.firstIndex(where: { $0.id == threadId }) {
                 threads[index].status = CodexThreadSummary.status(params["status"])
+                saveCachedThreads()
             } else {
                 refreshThreads()
             }
@@ -401,6 +407,7 @@ final class CodexConnection {
         case "thread/closed", "thread/deleted", "thread/archived":
             guard let threadId = params["threadId"] as? String else { return }
             threads.removeAll { $0.id == threadId }
+            saveCachedThreads()
 
         case "thread/unarchived":
             refreshThreads()
@@ -596,6 +603,7 @@ final class CodexConnection {
     private func updateThreadStatus(_ threadId: String, status: String) {
         guard let index = threads.firstIndex(where: { $0.id == threadId }) else { return }
         threads[index].status = status
+        saveCachedThreads()
     }
 
     private func finishLoadingAgent(_ threadId: String) {
@@ -627,6 +635,21 @@ final class CodexConnection {
         }
 
         threads = next
+        saveCachedThreads()
+    }
+
+    private static func loadCachedThreads(from defaults: UserDefaults) -> [CodexThreadSummary] {
+        guard let data = defaults.data(forKey: cachedThreadsKey),
+              let cached = try? JSONDecoder().decode([CodexThreadSummary].self, from: data) else {
+            return []
+        }
+        return cached
+    }
+
+    private func saveCachedThreads() {
+        if let data = try? JSONEncoder().encode(threads) {
+            UserDefaults.standard.set(data, forKey: Self.cachedThreadsKey)
+        }
     }
 
     @discardableResult
