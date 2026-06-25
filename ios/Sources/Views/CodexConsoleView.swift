@@ -474,12 +474,11 @@ struct CodexThreadDetailView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background {
-            Color(.systemBackground)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .overlay {
-            InputAccessorySurface()
-                .allowsHitTesting(false)
+            ZStack {
+                Color(.systemBackground)
+                    .ignoresSafeArea(edges: .bottom)
+                InputAccessorySurface()
+            }
         }
         .onChange(of: selectedPhotoItems) { _, items in
             Task {
@@ -633,12 +632,11 @@ struct PendingInputBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background {
-            Color(.systemBackground)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .overlay {
-            InputAccessorySurface()
-                .allowsHitTesting(false)
+            ZStack {
+                Color(.systemBackground)
+                    .ignoresSafeArea(edges: .bottom)
+                InputAccessorySurface()
+            }
         }
     }
 
