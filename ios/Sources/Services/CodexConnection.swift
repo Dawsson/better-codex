@@ -15,6 +15,19 @@ private struct PendingImageUpload {
     let path: String
 }
 
+struct QueuedCodexMessage: Identifiable, Equatable {
+    let id: String
+    let text: String
+    let imageCount: Int
+}
+
+private struct QueuedCodexTurn {
+    let id: String
+    let threadId: String
+    let text: String
+    let images: [CodexImageAttachment]
+}
+
 @Observable
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
@@ -36,6 +49,7 @@ final class CodexConnection {
     var isLoadingThreads = false
     var isLoadingThread = false
     var transcriptRevision = 0
+    var queuedMessages: [QueuedCodexMessage] = []
 
     var isConnected: Bool { connectionState == .connected }
     var workingStartedAt: Date? { activeTurnStartedAt }
@@ -59,6 +73,7 @@ final class CodexConnection {
     private var hiddenThreadIds: Set<String> = []
     private var pendingImageTurns: [String: PendingImageTurn] = [:]
     private var pendingImageUploads: [Int: PendingImageUpload] = [:]
+    private var queuedTurns: [QueuedCodexTurn] = []
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -142,6 +157,7 @@ final class CodexConnection {
         requestKinds.removeAll()
         pendingImageTurns.removeAll()
         pendingImageUploads.removeAll()
+        clearQueuedTurns()
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
         loadingAgentOrder.removeAll()
@@ -236,6 +252,7 @@ final class CodexConnection {
         transcriptRevision += 1
         isLoadingThread = true
         pendingInput = nil
+        clearQueuedTurns()
         sendRequest(
             method: "thread/read",
             params: ["threadId": thread.id, "includeTurns": true],
@@ -263,7 +280,18 @@ final class CodexConnection {
 
         HapticManager.shared.sent()
         freshThreadIds.remove(threadId)
+
+        if isWorking {
+            enqueueTurn(threadId: threadId, text: trimmed, images: images)
+            return
+        }
+
         append(.user, title: "You", text: trimmed, images: images)
+        sendTurn(threadId: threadId, text: trimmed, images: images)
+    }
+
+    private func sendTurn(threadId: String, text: String, images: [CodexImageAttachment]) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let uploadableImages = images.filter { $0.dataBase64 != nil }
         guard !uploadableImages.isEmpty else {
@@ -297,6 +325,26 @@ final class CodexConnection {
                 kind: "fs/writeFile:image"
             )
         }
+    }
+
+    private func enqueueTurn(threadId: String, text: String, images: [CodexImageAttachment]) {
+        let id = UUID().uuidString
+        queuedTurns.append(QueuedCodexTurn(id: id, threadId: threadId, text: text, images: images))
+        queuedMessages.append(QueuedCodexMessage(id: id, text: text, imageCount: images.count))
+        append(.user, title: "Queued", text: text, images: images)
+    }
+
+    private func clearQueuedTurns() {
+        queuedTurns.removeAll()
+        queuedMessages.removeAll()
+    }
+
+    private func startNextQueuedTurnIfNeeded() {
+        guard !isWorking, !queuedTurns.isEmpty else { return }
+        let next = queuedTurns.removeFirst()
+        queuedMessages.removeAll { $0.id == next.id }
+        append(.status, title: "Queued message sent", text: "")
+        sendTurn(threadId: next.threadId, text: next.text, images: next.images)
     }
 
     private func startTurn(threadId: String, text: String, images: [CodexImageAttachment]) {
@@ -389,6 +437,7 @@ final class CodexConnection {
         isLoadingThreads = false
         isLoadingThread = false
         requestKinds.removeAll()
+        clearQueuedTurns()
 
         guard shouldAutoReconnect else {
             connectionState = .disconnected
@@ -608,6 +657,7 @@ final class CodexConnection {
             }
             activeTurnStartedAt = nil
             refreshThreads()
+            startNextQueuedTurnIfNeeded()
 
         case "item/started":
             if belongsToActiveThread(params), let item = params["item"] as? [String: Any] {

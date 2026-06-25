@@ -327,7 +327,6 @@ struct CodexThreadDetailView: View {
     @State private var isProcessingImages = false
     @State private var imageError: String?
     @State private var isNearBottom = true
-    @State private var showGitSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -335,22 +334,8 @@ struct CodexThreadDetailView: View {
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showGitSheet = true
-                } label: {
-                    Image(systemName: "arrow.triangle.branch")
-                }
-                .disabled(!codex.isConnected)
-                .accessibilityLabel("Git actions")
-            }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomInputBar
-        }
-        .sheet(isPresented: $showGitSheet) {
-            GitActionsSheet(thread: thread, codex: codex)
         }
         .onAppear {
             codex.openThread(thread)
@@ -434,6 +419,10 @@ struct CodexThreadDetailView: View {
                     .padding(.horizontal, 4)
             }
 
+            if !codex.queuedMessages.isEmpty {
+                QueuedMessagesStrip(messages: codex.queuedMessages)
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
                 PhotosPicker(
                     selection: $selectedPhotoItems,
@@ -476,15 +465,22 @@ struct CodexThreadDetailView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
+                        .background(sendColor, in: Circle())
                 }
                 .disabled(!canSend)
-                .accessibilityLabel("Send")
+                .accessibilityLabel(codex.isWorking ? "Queue message" : "Send")
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background { InputAccessorySurface() }
+        .background {
+            Color(.systemBackground)
+                .ignoresSafeArea(edges: .bottom)
+        }
+        .overlay {
+            InputAccessorySurface()
+                .allowsHitTesting(false)
+        }
         .onChange(of: selectedPhotoItems) { _, items in
             Task {
                 await loadSelectedImages(from: items)
@@ -496,6 +492,11 @@ struct CodexThreadDetailView: View {
         codex.isConnected
             && !isProcessingImages
             && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedImages.isEmpty)
+    }
+
+    private var sendColor: Color {
+        guard canSend else { return Color.secondary.opacity(0.35) }
+        return codex.isWorking ? .orange : .blue
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -542,190 +543,60 @@ struct CodexThreadDetailView: View {
 
 struct InputAccessorySurface: View {
     var body: some View {
-        Color(.systemBackground)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.12))
-                    .frame(height: 1)
-            }
-            .clipShape(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 20,
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 20,
-                    style: .continuous
-                )
-            )
+        UnevenRoundedRectangle(
+            topLeadingRadius: 20,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 20,
+            style: .continuous
+        )
+        .fill(Color(.systemBackground))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(height: 1)
+        }
     }
 }
 
-struct GitActionsSheet: View {
-    let thread: CodexThreadSummary
-    let codex: CodexConnection
-    @Environment(\.dismiss) private var dismiss
-    @State private var commitMessage = ""
+struct QueuedMessagesStrip: View {
+    let messages: [QueuedCodexMessage]
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Repository") {
-                    infoRow("Folder", thread.projectName)
-                    infoRow("Path", thread.cwd)
-                    if let branch = thread.branch, !branch.isEmpty {
-                        infoRow("Branch", branch)
-                    }
-                    if let commitsToPush = thread.commitsToPush {
-                        infoRow("To push", "\(commitsToPush)")
-                    }
-                }
-
-                Section {
-                    Button {
-                        send(gitInspectPrompt)
-                    } label: {
-                        Label("Inspect Changes", systemImage: "doc.text.magnifyingglass")
-                    }
-
-                    Button {
-                        send(commitMessagePrompt)
-                    } label: {
-                        Label("Generate Commit Message", systemImage: "text.badge.checkmark")
-                    }
-                } footer: {
-                    Text("These actions ask the open Codex agent to run git in this workspace.")
-                }
-
-                Section("Commit") {
-                    TextField("Commit message", text: $commitMessage, axis: .vertical)
-                        .lineLimit(1...3)
-                        .textInputAutocapitalization(.sentences)
-
-                    Button {
-                        send(commitPrompt)
-                    } label: {
-                        Label("Commit Changes", systemImage: "checkmark.seal")
-                    }
-                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                Section {
-                    Button {
-                        send(pushPrompt)
-                    } label: {
-                        Label("Push Branch", systemImage: "arrow.up.circle")
-                    }
-
-                    Button {
-                        send(commitAndPushPrompt)
-                    } label: {
-                        Label("Commit and Push", systemImage: "paperplane")
-                    }
-                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.badge.checkmark")
+                    .font(.caption.weight(.semibold))
+                Text(messages.count == 1 ? "1 message queued" : "\(messages.count) messages queued")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
             }
-            .navigationTitle("Git")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
+            .foregroundStyle(.orange)
+
+            ForEach(messages.prefix(2)) { message in
+                Text(label(for: message))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
-        .presentationDetents([.medium, .large])
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(
+            Color.orange.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 
-    private func infoRow(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 18)
-            Text(value)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
+    private func label(for message: QueuedCodexMessage) -> String {
+        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty, message.imageCount > 0 {
+            return "\(text)  +\(message.imageCount) image\(message.imageCount == 1 ? "" : "s")"
         }
-    }
-
-    private func send(_ prompt: String) {
-        codex.sendPrompt(prompt)
-        dismiss()
-    }
-
-    private var quotedCwd: String {
-        shellQuote(thread.cwd)
-    }
-
-    private func shellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
-
-    private var gitInspectPrompt: String {
-        """
-        Run this exact git inspection in this workspace and show the results:
-
-        cd \(quotedCwd)
-        git status --short --branch
-        git diff --stat
-        git diff --name-status
-        git diff --cached --stat
-
-        Summarize changed files, untracked files, branch/ahead state, and whether it is ready to commit or push. Do not commit or push.
-        """
-    }
-
-    private var commitMessagePrompt: String {
-        """
-        Inspect the git status and diff in \(thread.cwd), then propose one concise commit message. Do not commit.
-
-        Run:
-        cd \(quotedCwd)
-        git status --short --branch
-        git diff --stat
-        git diff --name-status
-
-        Return the message plainly first, then a short note about why it fits.
-        """
-    }
-
-    private var commitPrompt: String {
-        let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        return """
-        In \(thread.cwd), commit the intended current changes with this message:
-        \(message)
-
-        Run `git status --short --branch` first. Use the repo's required commit tool if present:
-        committer \(shellQuote(message)) <explicit changed files>
-
-        List every intended changed file explicitly. Do not use `git add .`. Do not include unrelated files. Do not push.
-        """
-    }
-
-    private var pushPrompt: String {
-        """
-        In \(thread.cwd), check the current branch and push it to its upstream.
-
-        Run:
-        cd \(quotedCwd)
-        git status --short --branch
-        git branch --show-current
-
-        If there is no upstream, explain the safest push command before running it.
-        """
-    }
-
-    private var commitAndPushPrompt: String {
-        let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        return """
-        In \(thread.cwd), review the current git state, commit the intended changes with this commit message, then push the branch:
-        \(message)
-
-        Run `git status --short --branch` first. Use the repo's required commit tool if present:
-        committer \(shellQuote(message)) <explicit changed files>
-
-        List every intended changed file explicitly. Do not use `git add .`. Do not include unrelated files. Push only after the commit succeeds.
-        """
+        if !text.isEmpty {
+            return text
+        }
+        return "\(message.imageCount) image\(message.imageCount == 1 ? "" : "s")"
     }
 }
 
@@ -761,7 +632,14 @@ struct PendingInputBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background { InputAccessorySurface() }
+        .background {
+            Color(.systemBackground)
+                .ignoresSafeArea(edges: .bottom)
+        }
+        .overlay {
+            InputAccessorySurface()
+                .allowsHitTesting(false)
+        }
     }
 
     private var canSend: Bool {
