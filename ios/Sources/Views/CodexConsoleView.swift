@@ -369,7 +369,7 @@ struct CodexThreadDetailView: View {
 
                     ForEach(codex.entries) { entry in
                         CodexEntryRow(entry: entry, revision: codex.transcriptRevision)
-                            .id(entry.id)
+                            .id("\(entry.id)-\(codex.transcriptRevision)")
                     }
 
                     if codex.isWorking {
