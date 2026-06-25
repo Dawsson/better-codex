@@ -14,7 +14,7 @@ struct CodexThreadSummary: Identifiable, Hashable {
         self.id = id
         let preview = json["preview"] as? String
         let name = json["name"] as? String
-        self.title = (name?.isEmpty == false ? name : preview) ?? "Untitled session"
+        self.title = (name?.isEmpty == false ? name : preview?.nilIfEmpty) ?? "Untitled agent"
         self.cwd = json["cwd"] as? String ?? ""
         self.status = CodexThreadSummary.status(json["status"])
         self.model = json["modelProvider"] as? String ?? ""
@@ -32,7 +32,7 @@ struct CodexThreadSummary: Identifiable, Hashable {
         return nil
     }
 
-    private static func status(_ value: Any?) -> String {
+    static func status(_ value: Any?) -> String {
         if let value = value as? String { return value }
         if let value = value as? [String: Any],
            let type = value["type"] as? String {
@@ -49,6 +49,12 @@ struct CodexThreadSummary: Identifiable, Hashable {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: updatedAt, relativeTo: Date())
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

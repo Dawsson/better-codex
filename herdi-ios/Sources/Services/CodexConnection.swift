@@ -29,6 +29,8 @@ final class CodexConnection {
     private var activeThreadId: String?
     private var activeTurnId: String?
     private var entriesByItemId: [String: CodexEntry] = [:]
+    private var loadingAgentIds: Set<String> = []
+    private var loadingAgentsById: [String: CodexThreadSummary] = [:]
 
     init() {
         let defaults = UserDefaults.standard
@@ -77,6 +79,8 @@ final class CodexConnection {
         isLoadingThread = false
         connectionState = .disconnected
         requestKinds.removeAll()
+        loadingAgentIds.removeAll()
+        loadingAgentsById.removeAll()
         if !keepState {
             threads.removeAll()
             selectedThread = nil
@@ -89,17 +93,12 @@ final class CodexConnection {
     func refreshThreads() {
         guard isConnected else { return }
         isLoadingThreads = true
+        loadingAgentIds.removeAll()
+        loadingAgentsById.removeAll()
         sendRequest(
-            method: "thread/list",
-            params: [
-                "limit": 80,
-                "sortKey": "recency_at",
-                "sortDirection": "desc",
-                "archived": false,
-                "cwd": cwd,
-                "sourceKinds": ["cli", "appServer", "vscode", "unknown"]
-            ],
-            kind: "thread/list"
+            method: "thread/loaded/list",
+            params: ["limit": 80],
+            kind: "thread/loaded/list"
         )
     }
 
@@ -241,7 +240,11 @@ final class CodexConnection {
         if let error = message["error"] as? [String: Any] {
             lastError = error["message"] as? String ?? "Codex request failed"
             append(.error, title: "Error", text: lastError ?? "Codex request failed")
-            if kind == "thread/list" { isLoadingThreads = false }
+            if kind == "thread/loaded/list" { isLoadingThreads = false }
+            if kind?.hasPrefix("thread/read:list:") == true {
+                let threadId = String(kind?.dropFirst("thread/read:list:".count) ?? "")
+                finishLoadingAgent(threadId)
+            }
             if kind?.hasPrefix("thread/read:") == true { isLoadingThread = false }
             return
         }
@@ -253,10 +256,22 @@ final class CodexConnection {
             connectionState = .connected
             refreshThreads()
 
-        case "thread/list":
-            isLoadingThreads = false
-            let data = result["data"] as? [[String: Any]] ?? []
-            threads = data.compactMap(CodexThreadSummary.init(json:))
+        case "thread/loaded/list":
+            let ids = result["data"] as? [String] ?? []
+            guard !ids.isEmpty else {
+                threads = []
+                isLoadingThreads = false
+                return
+            }
+            loadingAgentIds = Set(ids)
+            loadingAgentsById.removeAll()
+            for threadId in ids {
+                sendRequest(
+                    method: "thread/read",
+                    params: ["threadId": threadId, "includeTurns": false],
+                    kind: "thread/read:list:\(threadId)"
+                )
+            }
 
         case "thread/start:new":
             guard let thread = result["thread"] as? [String: Any],
@@ -267,7 +282,12 @@ final class CodexConnection {
             openThread(summary)
 
         default:
-            if kind?.hasPrefix("thread/read:") == true,
+            if kind?.hasPrefix("thread/read:list:") == true,
+               let thread = result["thread"] as? [String: Any],
+               let summary = CodexThreadSummary(json: thread) {
+                loadingAgentsById[summary.id] = summary
+                finishLoadingAgent(summary.id)
+            } else if kind?.hasPrefix("thread/read:") == true,
                let thread = result["thread"] as? [String: Any] {
                 loadHistory(from: thread)
                 isLoadingThread = false
@@ -288,6 +308,21 @@ final class CodexConnection {
                !threads.contains(where: { $0.id == summary.id }) {
                 threads.insert(summary, at: 0)
             }
+
+        case "thread/status/changed":
+            guard let threadId = params["threadId"] as? String else { return }
+            if let index = threads.firstIndex(where: { $0.id == threadId }) {
+                threads[index].status = CodexThreadSummary.status(params["status"])
+            } else {
+                refreshThreads()
+            }
+
+        case "thread/closed", "thread/deleted", "thread/archived":
+            guard let threadId = params["threadId"] as? String else { return }
+            threads.removeAll { $0.id == threadId }
+
+        case "thread/unarchived":
+            refreshThreads()
 
         case "turn/started":
             isWorking = true
@@ -437,9 +472,17 @@ final class CodexConnection {
 
     private func touchThread(_ threadId: String) {
         guard let index = threads.firstIndex(where: { $0.id == threadId }) else { return }
-        threads[index].status = "running"
+        threads[index].status = "active"
         let thread = threads.remove(at: index)
         threads.insert(thread, at: 0)
+    }
+
+    private func finishLoadingAgent(_ threadId: String) {
+        loadingAgentIds.remove(threadId)
+        guard loadingAgentIds.isEmpty else { return }
+        threads = loadingAgentsById.values.sorted { $0.updatedAt > $1.updatedAt }
+        loadingAgentsById.removeAll()
+        isLoadingThreads = false
     }
 
     @discardableResult

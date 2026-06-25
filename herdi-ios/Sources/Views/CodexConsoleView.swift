@@ -34,18 +34,18 @@ struct CodexThreadListView: View {
                 connectionRow
             }
 
-            Section("Sessions") {
+            Section("Open Agents") {
                 if codex.isLoadingThreads && codex.threads.isEmpty {
                     HStack {
                         ProgressView()
-                        Text("Loading sessions")
+                        Text("Loading agents")
                             .foregroundStyle(.secondary)
                     }
                 } else if codex.threads.isEmpty {
                     ContentUnavailableView(
-                        codex.isConnected ? "No sessions" : "Connect to Codex",
+                        codex.isConnected ? "No open agents" : "Connect to Codex",
                         systemImage: codex.isConnected ? "text.bubble" : "antenna.radiowaves.left.and.right",
-                        description: Text(codex.isConnected ? "Start a session from your phone or run cx in Terminal." : "Add the app-server token in Settings.")
+                        description: Text(codex.isConnected ? "Start one from your phone or open a cx session on the Mac." : "Add the app-server token in Settings.")
                     )
                 } else {
                     ForEach(codex.threads) { thread in
@@ -74,7 +74,7 @@ struct CodexThreadListView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(!codex.isConnected || codex.isLoadingThreads)
-                .accessibilityLabel("Refresh sessions")
+                .accessibilityLabel("Refresh agents")
 
                 Button {
                     codex.startNewThread()
@@ -82,7 +82,7 @@ struct CodexThreadListView: View {
                     Image(systemName: "plus")
                 }
                 .disabled(!codex.isConnected)
-                .accessibilityLabel("New session")
+                .accessibilityLabel("New agent")
             }
         }
         .refreshable {
@@ -213,7 +213,7 @@ struct CodexThreadDetailView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .accessibilityLabel("Reload session")
+                    .accessibilityLabel("Reload agent")
                 }
             }
         }
@@ -238,7 +238,7 @@ struct CodexThreadDetailView: View {
                         ContentUnavailableView(
                             "No transcript",
                             systemImage: "terminal",
-                            description: Text("Send a message to start this session.")
+                            description: Text("Send a message to start this agent.")
                         )
                         .frame(maxWidth: .infinity, minHeight: 300)
                     }
