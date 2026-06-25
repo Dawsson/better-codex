@@ -33,6 +33,10 @@ final class CodexConnection {
     private var activeTurnId: String?
     private var activeTurnStartedAt: Date?
     private var entriesByItemId: [String: CodexEntry] = [:]
+    private var activeExplorationEntry: CodexEntry?
+    private var explorationItemIds: Set<String> = []
+    private var explorationLabelsByItemId: [String: String] = [:]
+    private var explorationItemOrder: [String] = []
     private var loadingAgentIds: Set<String> = []
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
     private var loadingAgentOrder: [String] = []
@@ -104,6 +108,7 @@ final class CodexConnection {
             activeThreadId = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+            resetExplorationState()
             transcriptRevision += 1
         }
     }
@@ -162,6 +167,7 @@ final class CodexConnection {
             activeThreadId = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+            resetExplorationState()
             transcriptRevision += 1
         }
         saveHiddenThreadIds()
@@ -183,6 +189,7 @@ final class CodexConnection {
         activeThreadId = thread.id
         entries.removeAll()
         entriesByItemId.removeAll()
+        resetExplorationState()
         transcriptRevision += 1
         isLoadingThread = true
         pendingInput = nil
@@ -499,6 +506,7 @@ final class CodexConnection {
         case "turn/completed":
             isWorking = false
             activeTurnId = nil
+            endActiveExplorationGroup()
             if let activeTurnStartedAt {
                 append(.status, title: "Worked for \(Self.durationString(from: activeTurnStartedAt, to: Date()))", text: "")
             }
@@ -527,6 +535,9 @@ final class CodexConnection {
             guard belongsToActiveThread(params),
                   let itemId = params["itemId"] as? String,
                   let delta = params["delta"] as? String else { return }
+            if explorationItemIds.contains(itemId) {
+                return
+            }
             let entry = entriesByItemId["output-\(itemId)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(itemId)")
             if let commandEntry = entriesByItemId[itemId], commandEntry.kind == .command {
                 commandEntry.detail += delta
@@ -570,6 +581,7 @@ final class CodexConnection {
     private func loadHistory(from thread: [String: Any]) {
         entries.removeAll()
         entriesByItemId.removeAll()
+        resetExplorationState()
         transcriptRevision += 1
         let turns = thread["turns"] as? [[String: Any]] ?? []
         for turn in turns {
@@ -577,6 +589,7 @@ final class CodexConnection {
             for item in items {
                 upsertItem(item, completed: true)
             }
+            endActiveExplorationGroup()
         }
         if entries.isEmpty {
             append(.status, title: "No transcript", text: "This session has no loaded items yet.")
@@ -588,6 +601,7 @@ final class CodexConnection {
         activeThreadId = thread.id
         entries.removeAll()
         entriesByItemId.removeAll()
+        resetExplorationState()
         transcriptRevision += 1
         isLoadingThread = false
         pendingInput = nil
@@ -632,6 +646,7 @@ final class CodexConnection {
 
         switch type {
         case "userMessage":
+            endActiveExplorationGroup()
             let content = item["content"] as? [[String: Any]] ?? []
             let text = content.compactMap { input -> String? in
                 guard input["type"] as? String == "text" else { return nil }
@@ -643,6 +658,7 @@ final class CodexConnection {
             transcriptRevision += 1
 
         case "agentMessage":
+            endActiveExplorationGroup()
             let text = item["text"] as? String ?? ""
             let entry = entriesByItemId[id] ?? append(.assistant, title: "Codex", text: "", itemId: id)
             if !text.isEmpty { entry.text = text }
@@ -650,6 +666,13 @@ final class CodexConnection {
 
         case "commandExecution":
             let command = item["command"] as? String ?? ""
+            if let explorationLabel = Self.explorationLabel(for: command) {
+                upsertExplorationItem(id: id, label: explorationLabel)
+                transcriptRevision += 1
+                return
+            }
+
+            endActiveExplorationGroup()
             let status = item["status"].map { String(describing: $0) } ?? (completed ? "completed" : "running")
             let entry = entriesByItemId[id] ?? append(.command, title: "Command", text: command, itemId: id)
             entry.title = status
@@ -660,12 +683,14 @@ final class CodexConnection {
             transcriptRevision += 1
 
         case "plan":
+            endActiveExplorationGroup()
             let text = item["text"] as? String ?? ""
             let entry = entriesByItemId[id] ?? append(.assistant, title: "Plan", text: "", itemId: id)
             entry.text = text
             transcriptRevision += 1
 
         case "reasoning":
+            endActiveExplorationGroup()
             if let summary = item["summary"] as? [String], !summary.isEmpty {
                 let entry = entriesByItemId[id] ?? append(.status, title: "Reasoning", text: "", itemId: id)
                 entry.text = summary.joined(separator: "\n")
@@ -673,6 +698,7 @@ final class CodexConnection {
             }
 
         case "mcpToolCall":
+            endActiveExplorationGroup()
             let server = item["server"] as? String ?? "MCP"
             let tool = item["tool"] as? String ?? "tool"
             let status = item["status"].map { String(describing: $0) } ?? ""
@@ -689,6 +715,190 @@ final class CodexConnection {
     private func belongsToActiveThread(_ params: [String: Any]) -> Bool {
         guard let threadId = params["threadId"] as? String else { return true }
         return activeThreadId == nil || activeThreadId == threadId
+    }
+
+    private func upsertExplorationItem(id: String, label: String) {
+        explorationItemIds.insert(id)
+        if !explorationItemOrder.contains(id) {
+            explorationItemOrder.append(id)
+        }
+        explorationLabelsByItemId[id] = label
+
+        let entry = activeExplorationEntry ?? append(.exploration, title: "Explored", text: "")
+        activeExplorationEntry = entry
+        entry.title = "Explored"
+        entry.text = explorationItemOrder.compactMap { explorationLabelsByItemId[$0] }.joined(separator: "\n")
+        entry.detail = ""
+    }
+
+    private func resetExplorationState() {
+        activeExplorationEntry = nil
+        explorationItemIds.removeAll()
+        explorationLabelsByItemId.removeAll()
+        explorationItemOrder.removeAll()
+    }
+
+    private func endActiveExplorationGroup() {
+        activeExplorationEntry = nil
+        explorationLabelsByItemId.removeAll()
+        explorationItemOrder.removeAll()
+    }
+
+    private static func explorationLabel(for command: String) -> String? {
+        let commands = command.components(separatedBy: "&&")
+        let labels = commands.compactMap { explorationLabelForSingleCommand($0) }
+        guard !labels.isEmpty, labels.count == commands.count else { return nil }
+        return labels.joined(separator: "\n")
+    }
+
+    private static func explorationLabelForSingleCommand(_ command: String) -> String? {
+        var tokens = shellTokens(command)
+        guard !tokens.isEmpty else { return nil }
+
+        if let first = tokens.first, ["cd", "env"].contains(first) {
+            tokens.removeFirst()
+            while let first = tokens.first, first.contains("=") {
+                tokens.removeFirst()
+            }
+        }
+
+        guard let tool = tokens.first else { return nil }
+        let args = Array(tokens.dropFirst())
+
+        switch tool {
+        case "rg", "grep":
+            if args.contains("--files") {
+                return "List files\(targetSuffix(from: readableTargets(in: args)))"
+            }
+            return searchLabel(from: args)
+
+        case "sed", "cat", "nl", "head", "tail", "less":
+            let targets = readableTargets(in: args)
+            guard !targets.isEmpty else { return nil }
+            return "Read \(targets.joined(separator: ", "))"
+
+        case "ls":
+            return "List\(targetSuffix(from: readableTargets(in: args)))"
+
+        case "find":
+            let targets = readableTargets(in: args)
+            return "Find\(targetSuffix(from: targets.isEmpty ? ["."] : targets))"
+
+        case "pwd":
+            return "Check current directory"
+
+        default:
+            return nil
+        }
+    }
+
+    private static func searchLabel(from args: [String]) -> String? {
+        var pattern: String?
+        var targets: [String] = []
+        var index = 0
+
+        while index < args.count {
+            let arg = args[index]
+            if arg.hasPrefix("-") {
+                if ["-e", "--regexp", "-g", "--glob", "--type", "-t"].contains(arg), index + 1 < args.count {
+                    if arg == "-e" || arg == "--regexp" {
+                        pattern = args[index + 1]
+                    }
+                    index += 2
+                } else {
+                    index += 1
+                }
+                continue
+            }
+
+            if pattern == nil {
+                pattern = arg
+            } else {
+                targets.append(arg)
+            }
+            index += 1
+        }
+
+        guard let pattern else { return nil }
+        let targetText = targets.isEmpty ? "" : " in \(targets.joined(separator: ", "))"
+        return "Search \(pattern)\(targetText)"
+    }
+
+    private static func targetSuffix(from targets: [String]) -> String {
+        targets.isEmpty ? "" : " \(targets.joined(separator: ", "))"
+    }
+
+    private static func readableTargets(in args: [String]) -> [String] {
+        var targets: [String] = []
+        var index = 0
+        let flagsWithValues: Set<String> = [
+            "-e", "--regexp", "-g", "--glob", "--type", "-t", "-m", "--max-count",
+            "-A", "-B", "-C", "--after-context", "--before-context", "--context",
+            "--include", "--exclude", "-n", "--lines"
+        ]
+
+        while index < args.count {
+            let arg = args[index]
+            if flagsWithValues.contains(arg), index + 1 < args.count {
+                index += 2
+                continue
+            }
+            if arg.hasPrefix("-") || arg.range(of: #"^\d+,\d+p$"#, options: .regularExpression) != nil {
+                index += 1
+                continue
+            }
+            if arg != "|" && arg != ">" && arg != "2>" && arg != "/dev/null" {
+                targets.append(arg)
+            }
+            index += 1
+        }
+
+        return Array(targets.prefix(4))
+    }
+
+    private static func shellTokens(_ command: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+        var isEscaped = false
+
+        for character in command.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if isEscaped {
+                current.append(character)
+                isEscaped = false
+                continue
+            }
+
+            if character == "\\" {
+                isEscaped = true
+                continue
+            }
+
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+
+            if character == "'" || character == "\"" {
+                quote = character
+            } else if character.isWhitespace {
+                if !current.isEmpty {
+                    tokens.append(current)
+                    current = ""
+                }
+            } else {
+                current.append(character)
+            }
+        }
+
+        if !current.isEmpty {
+            tokens.append(current)
+        }
+        return tokens
     }
 
     private static func durationString(from start: Date, to end: Date) -> String {

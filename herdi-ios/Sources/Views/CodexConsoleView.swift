@@ -498,6 +498,9 @@ struct CodexEntryRow: View {
             case .command:
                 CommandRunView(entry: entry)
 
+            case .exploration:
+                ExplorationRunView(entry: entry)
+
             case .tool:
                 ToolRunView(entry: entry)
 
@@ -529,6 +532,55 @@ struct CodexEntryRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct ExplorationRunView: View {
+    let entry: CodexEntry
+
+    private var lines: [String] {
+        entry.text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.badge.magnifyingglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.cyan)
+
+                Text(entry.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .top, spacing: 9) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.22))
+                    .frame(width: 1)
+                    .padding(.vertical, 5)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text(index == lines.indices.last ? "└" : "├")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary.opacity(0.7))
+
+                            Text(line)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+            .padding(.leading, 5)
+        }
+        .padding(.vertical, 2)
     }
 }
 

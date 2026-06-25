@@ -127,6 +127,7 @@ enum CodexEntryKind: String {
     case user
     case assistant
     case command
+    case exploration
     case output
     case status
     case error
