@@ -374,6 +374,11 @@ struct CodexThreadDetailView: View {
                             .id(entry.id)
                     }
 
+                    if codex.isWorking {
+                        WorkingTranscriptIndicator()
+                            .id("working-indicator")
+                    }
+
                     Color.clear
                         .frame(height: 1)
                         .id("transcript-bottom")
@@ -387,6 +392,10 @@ struct CodexThreadDetailView: View {
             .onChange(of: codex.transcriptRevision) { _, _ in
                 guard isNearBottom else { return }
                 scrollToBottom(proxy, animated: false)
+            }
+            .onChange(of: codex.isWorking) { _, _ in
+                guard isNearBottom else { return }
+                scrollToBottom(proxy, animated: true)
             }
             .onAppear {
                 scrollToBottom(proxy, animated: false)
@@ -600,35 +609,50 @@ struct CommandRunView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(.secondarySystemBackground).opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 2)
+        .tint(.secondary)
     }
 
     private var commandLabel: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Image(systemName: "terminal")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.cyan)
-                Text("Command")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if !entry.title.isEmpty {
-                    Text(entry.title)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("•")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text("Ran")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
             Text(entry.text)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.primary)
-                .lineLimit(entry.isExpanded ? nil : 2)
+                .lineLimit(entry.isExpanded ? nil : 3)
                 .textSelection(.enabled)
+
+            Spacer(minLength: 0)
+
+            if !entry.title.isEmpty, entry.title != "completed" {
+                Text(entry.title)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
         }
         .contentShape(Rectangle())
+    }
+}
+
+struct WorkingTranscriptIndicator: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text("Working")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .accessibilityLabel("Agent working")
     }
 }
 

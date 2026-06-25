@@ -674,9 +674,9 @@ final class CodexConnection {
 
             endActiveExplorationGroup()
             let status = item["status"].map { String(describing: $0) } ?? (completed ? "completed" : "running")
-            let entry = entriesByItemId[id] ?? append(.command, title: "Command", text: command, itemId: id)
+            let entry = entriesByItemId[id] ?? append(.command, title: "Ran", text: Self.displayCommand(for: command), itemId: id)
             entry.title = status
-            entry.text = command
+            entry.text = Self.displayCommand(for: command)
             if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
                 entry.detail = output
             }
@@ -745,7 +745,7 @@ final class CodexConnection {
     }
 
     private static func explorationLabel(for command: String) -> String? {
-        let commands = command.components(separatedBy: "&&")
+        let commands = unwrappedShellCommand(command).components(separatedBy: "&&")
         let labels = commands.compactMap { explorationLabelForSingleCommand($0) }
         guard !labels.isEmpty, labels.count == commands.count else { return nil }
         return labels.joined(separator: "\n")
@@ -822,6 +822,37 @@ final class CodexConnection {
         guard let pattern else { return nil }
         let targetText = targets.isEmpty ? "" : " in \(targets.joined(separator: ", "))"
         return "Search \(pattern)\(targetText)"
+    }
+
+    private static func displayCommand(for command: String) -> String {
+        let unwrapped = unwrappedShellCommand(command)
+        let tokens = shellTokens(unwrapped)
+        guard !tokens.isEmpty else { return unwrapped.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return tokens.map(displayToken).joined(separator: " ")
+    }
+
+    private static func displayToken(_ token: String) -> String {
+        guard token.rangeOfCharacter(from: .whitespacesAndNewlines) != nil else {
+            return token
+        }
+        return "\"\(token.replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    private static func unwrappedShellCommand(_ command: String) -> String {
+        let tokens = shellTokens(command)
+        guard let shell = tokens.first?.split(separator: "/").last else {
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard ["sh", "bash", "zsh"].contains(String(shell)) else {
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        for (index, token) in tokens.enumerated() where ["-c", "-lc", "-ilc"].contains(token) {
+            if index + 1 < tokens.count {
+                return tokens[(index + 1)...].joined(separator: " ")
+            }
+        }
+        return command.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func targetSuffix(from targets: [String]) -> String {
