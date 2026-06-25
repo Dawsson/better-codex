@@ -31,6 +31,7 @@ final class CodexConnection {
     private var entriesByItemId: [String: CodexEntry] = [:]
     private var loadingAgentIds: Set<String> = []
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
+    private var freshThreadIds: Set<String> = []
 
     init() {
         let defaults = UserDefaults.standard
@@ -81,6 +82,7 @@ final class CodexConnection {
         requestKinds.removeAll()
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
+        freshThreadIds.removeAll()
         if !keepState {
             threads.removeAll()
             selectedThread = nil
@@ -114,6 +116,11 @@ final class CodexConnection {
     }
 
     func openThread(_ thread: CodexThreadSummary) {
+        if freshThreadIds.contains(thread.id) {
+            selectFreshThread(thread)
+            return
+        }
+
         selectedThread = thread
         activeThreadId = thread.id
         entries.removeAll()
@@ -146,6 +153,7 @@ final class CodexConnection {
         }
 
         HapticManager.shared.sent()
+        freshThreadIds.remove(threadId)
         append(.user, title: "You", text: trimmed)
 
         let params: [String: Any] = [
@@ -238,7 +246,12 @@ final class CodexConnection {
         let kind = requestKinds.removeValue(forKey: id)
 
         if let error = message["error"] as? [String: Any] {
-            lastError = error["message"] as? String ?? "Codex request failed"
+            let errorMessage = error["message"] as? String ?? "Codex request failed"
+            if recoverFreshThreadError(kind: kind, message: errorMessage) {
+                return
+            }
+
+            lastError = errorMessage
             append(.error, title: "Error", text: lastError ?? "Codex request failed")
             if kind == "thread/loaded/list" { isLoadingThreads = false }
             if kind?.hasPrefix("thread/read:list:") == true {
@@ -279,7 +292,8 @@ final class CodexConnection {
             if !threads.contains(where: { $0.id == summary.id }) {
                 threads.insert(summary, at: 0)
             }
-            openThread(summary)
+            freshThreadIds.insert(summary.id)
+            selectFreshThread(summary)
 
         default:
             if kind?.hasPrefix("thread/read:list:") == true,
@@ -410,6 +424,48 @@ final class CodexConnection {
         if entries.isEmpty {
             append(.status, title: "No transcript", text: "This session has no loaded items yet.")
         }
+    }
+
+    private func selectFreshThread(_ thread: CodexThreadSummary) {
+        selectedThread = thread
+        activeThreadId = thread.id
+        entries.removeAll()
+        entriesByItemId.removeAll()
+        isLoadingThread = false
+        pendingInput = nil
+    }
+
+    private func recoverFreshThreadError(kind: String?, message: String) -> Bool {
+        guard let threadId = threadId(from: kind),
+              message.contains("not materialized yet") || message.contains("no rollout found") else {
+            return false
+        }
+
+        if kind?.hasPrefix("thread/read:list:") == true {
+            finishLoadingAgent(threadId)
+            return true
+        }
+
+        guard let thread = selectedThread?.id == threadId
+            ? selectedThread
+            : threads.first(where: { $0.id == threadId }) else {
+            return false
+        }
+
+        freshThreadIds.insert(threadId)
+        selectFreshThread(thread)
+        lastError = nil
+        return true
+    }
+
+    private func threadId(from kind: String?) -> String? {
+        guard let kind else { return nil }
+        for prefix in ["thread/read:list:", "thread/read:", "thread/resume:"] {
+            if kind.hasPrefix(prefix) {
+                return String(kind.dropFirst(prefix.count))
+            }
+        }
+        return nil
     }
 
     private func upsertItem(_ item: [String: Any], completed: Bool) {
