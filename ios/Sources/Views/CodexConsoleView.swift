@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct CodexConsoleView: View {
     @Environment(CodexConnection.self) private var codex
@@ -320,6 +322,10 @@ struct CodexThreadDetailView: View {
     @Environment(CodexConnection.self) private var codex
     let thread: CodexThreadSummary
     @State private var prompt = ""
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var selectedImages: [CodexImageAttachment] = []
+    @State private var isProcessingImages = false
+    @State private var imageError: String?
     @State private var isNearBottom = true
     @State private var showGitSheet = false
 
@@ -411,36 +417,85 @@ struct CodexThreadDetailView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message Codex", text: $prompt, axis: .vertical)
-                .lineLimit(1...5)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
-                .disabled(!codex.isConnected)
-
-            Button {
-                let text = prompt
-                prompt = ""
-                codex.sendPrompt(text)
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
+        VStack(alignment: .leading, spacing: 8) {
+            if !selectedImages.isEmpty {
+                SelectedImageStrip(images: selectedImages) { image in
+                    selectedImages.removeAll { $0.id == image.id }
+                    if selectedImages.isEmpty {
+                        selectedPhotoItems = []
+                    }
+                }
             }
-            .disabled(!canSend)
-            .accessibilityLabel("Send")
+
+            if let imageError {
+                Text(imageError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 4)
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: 4,
+                    matching: .images
+                ) {
+                    Group {
+                        if isProcessingImages {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                }
+                .disabled(!codex.isConnected || isProcessingImages)
+                .accessibilityLabel("Attach image")
+
+                TextField("Message Codex", text: $prompt, axis: .vertical)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+                    .disabled(!codex.isConnected)
+
+                Button {
+                    let text = prompt
+                    let images = selectedImages
+                    prompt = ""
+                    selectedImages = []
+                    selectedPhotoItems = []
+                    codex.sendPrompt(text, images: images)
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background { InputAccessorySurface() }
+        .onChange(of: selectedPhotoItems) { _, items in
+            Task {
+                await loadSelectedImages(from: items)
+            }
+        }
     }
 
     private var canSend: Bool {
-        codex.isConnected && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        codex.isConnected
+            && !isProcessingImages
+            && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedImages.isEmpty)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -452,6 +507,36 @@ struct CodexThreadDetailView: View {
         } else {
             action()
         }
+    }
+
+    @MainActor
+    private func loadSelectedImages(from items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else {
+            selectedImages = []
+            imageError = nil
+            return
+        }
+
+        isProcessingImages = true
+        imageError = nil
+        var attachments: [CodexImageAttachment] = []
+
+        for item in items.prefix(4) {
+            do {
+                if let data = try await item.loadTransferable(type: Data.self),
+                   let attachment = ComposerImageProcessor.attachment(from: data) {
+                    attachments.append(attachment)
+                }
+            } catch {
+                imageError = "Couldn't attach one image."
+            }
+        }
+
+        selectedImages = attachments
+        if attachments.isEmpty {
+            imageError = "Couldn't attach that image."
+        }
+        isProcessingImages = false
     }
 }
 
@@ -654,13 +739,7 @@ struct CodexEntryRow: View {
         Group {
             switch entry.kind {
             case .user:
-                HStack {
-                    Spacer(minLength: 44)
-                    MarkdownText(entry.text, foregroundStyle: .white)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 9)
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
-                }
+                UserMessageView(entry: entry)
 
             case .assistant:
                 MarkdownText(entry.text)
@@ -1133,6 +1212,77 @@ struct WorkedDivider: View {
     }
 }
 
+enum ComposerImageProcessor {
+    private static let dimensions: [CGFloat] = [1024, 768, 512]
+    private static let maxEncodedBytes = 550_000
+    private static let qualities: [CGFloat] = [0.72, 0.62, 0.54, 0.46]
+
+    static func attachment(from data: Data) -> CodexImageAttachment? {
+        guard let image = UIImage(data: data),
+              let jpeg = compressedJPEGData(from: image) else {
+            return nil
+        }
+
+        let encoded = jpeg.base64EncodedString()
+        return CodexImageAttachment(
+            url: "data:image/jpeg;base64,\(encoded)",
+            detail: "low"
+        )
+    }
+
+    private static func compressedJPEGData(from image: UIImage) -> Data? {
+        var fallback: Data?
+        for dimension in dimensions {
+            let resized = resizedImage(from: image, maxDimension: dimension)
+            for quality in qualities {
+                guard let data = resized.jpegData(compressionQuality: quality) else { continue }
+                fallback = data
+                if data.count <= maxEncodedBytes {
+                    return data
+                }
+            }
+        }
+        return fallback
+    }
+
+    private static func resizedImage(from image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let largestSide = max(size.width, size.height)
+        guard largestSide > maxDimension else { return normalizedImage(from: image) }
+
+        let scale = maxDimension / largestSide
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+
+    private static func normalizedImage(from image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+}
+
+private extension CodexImageAttachment {
+    var uiImage: UIImage? {
+        guard url.hasPrefix("data:image/"),
+              let comma = url.firstIndex(of: ",") else {
+            return nil
+        }
+        let encoded = String(url[url.index(after: comma)...])
+        guard let data = Data(base64Encoded: encoded) else { return nil }
+        return UIImage(data: data)
+    }
+}
+
 struct MarkdownText: View {
     let text: String
     var foregroundStyle: Color = .primary
@@ -1294,6 +1444,125 @@ enum InlineMarkdownSegment {
     case plain(String)
     case bold(String)
     case code(String)
+}
+
+struct UserMessageView: View {
+    @Bindable var entry: CodexEntry
+
+    var body: some View {
+        HStack(alignment: .bottom) {
+            Spacer(minLength: 44)
+
+            VStack(alignment: .trailing, spacing: 7) {
+                if !entry.images.isEmpty {
+                    ImageAttachmentGrid(images: entry.images, alignment: .trailing)
+                }
+
+                if !entry.text.isEmpty {
+                    MarkdownText(entry.text, foregroundStyle: .white)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 9)
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
+        }
+    }
+}
+
+struct SelectedImageStrip: View {
+    let images: [CodexImageAttachment]
+    let remove: (CodexImageAttachment) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(images) { image in
+                    ZStack(alignment: .topTrailing) {
+                        ImageAttachmentThumbnail(image: image)
+                            .frame(width: 72, height: 72)
+
+                        Button {
+                            remove(image)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color.black.opacity(0.55))
+                        }
+                        .offset(x: 6, y: -6)
+                        .accessibilityLabel("Remove image")
+                    }
+                }
+            }
+            .padding(.top, 6)
+            .padding(.horizontal, 4)
+        }
+    }
+}
+
+struct ImageAttachmentGrid: View {
+    let images: [CodexImageAttachment]
+    var alignment: HorizontalAlignment = .leading
+
+    var body: some View {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.fixed(104), spacing: 6), count: min(images.count, 2)),
+            alignment: alignment,
+            spacing: 6
+        ) {
+            ForEach(images) { image in
+                ImageAttachmentThumbnail(image: image)
+                    .frame(width: 104, height: 104)
+            }
+        }
+    }
+}
+
+struct ImageAttachmentThumbnail: View {
+    let image: CodexImageAttachment
+
+    var body: some View {
+        Group {
+            if let uiImage = image.uiImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+            } else if image.url.hasPrefix("http://") || image.url.hasPrefix("https://") {
+                AsyncImage(url: URL(string: image.url)) { phase in
+                    switch phase {
+                    case .success(let loadedImage):
+                        loadedImage
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    case .empty:
+                        ProgressView()
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
+        .clipped()
+        .accessibilityLabel("Attached image")
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+            Image(systemName: "photo")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 struct CodeBlockView: View {

@@ -148,6 +148,7 @@ final class CodexEntry: Identifiable {
     var title: String
     var text: String
     var detail: String
+    var images: [CodexImageAttachment]
     var isExpanded: Bool
 
     init(
@@ -156,6 +157,7 @@ final class CodexEntry: Identifiable {
         title: String,
         text: String,
         detail: String = "",
+        images: [CodexImageAttachment] = [],
         isExpanded: Bool = false
     ) {
         self.id = id
@@ -163,7 +165,20 @@ final class CodexEntry: Identifiable {
         self.title = title
         self.text = text
         self.detail = detail
+        self.images = images
         self.isExpanded = isExpanded
+    }
+}
+
+struct CodexImageAttachment: Identifiable, Hashable {
+    let id: String
+    let url: String
+    let detail: String
+
+    init(id: String = UUID().uuidString, url: String, detail: String = "low") {
+        self.id = id
+        self.url = url
+        self.detail = detail
     }
 }
 

@@ -211,9 +211,9 @@ final class CodexConnection {
         )
     }
 
-    func sendPrompt(_ text: String) {
+    func sendPrompt(_ text: String, images: [CodexImageAttachment] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !images.isEmpty else { return }
         guard let threadId = activeThreadId else {
             append(.error, title: "Not ready", text: "Open or create a Codex session first.")
             return
@@ -221,11 +221,23 @@ final class CodexConnection {
 
         HapticManager.shared.sent()
         freshThreadIds.remove(threadId)
-        append(.user, title: "You", text: trimmed)
+        append(.user, title: "You", text: trimmed, images: images)
+
+        var input: [[String: Any]] = []
+        if !trimmed.isEmpty {
+            input.append(["type": "text", "text": trimmed, "text_elements": []])
+        }
+        input.append(contentsOf: images.map { image in
+            [
+                "type": "image",
+                "url": image.url,
+                "detail": image.detail
+            ]
+        })
 
         let params: [String: Any] = [
             "threadId": threadId,
-            "input": [["type": "text", "text": trimmed, "text_elements": []]],
+            "input": input,
             "cwd": cwd,
             "approvalPolicy": "never",
             "sandboxPolicy": ["type": "dangerFullAccess"]
@@ -653,9 +665,11 @@ final class CodexConnection {
                 guard input["type"] as? String == "text" else { return nil }
                 return input["text"] as? String
             }.joined(separator: "\n")
-            guard !text.isEmpty else { return }
+            let images = content.compactMap(Self.imageAttachment)
+            guard !text.isEmpty || !images.isEmpty else { return }
             let entry = entriesByItemId[id] ?? append(.user, title: "You", text: "", itemId: id)
             entry.text = text
+            entry.images = images
             transcriptRevision += 1
 
         case "agentMessage":
@@ -1003,9 +1017,29 @@ final class CodexConnection {
         UserDefaults.standard.set(Array(hiddenThreadIds), forKey: Self.hiddenThreadIdsKey)
     }
 
+    private static func imageAttachment(from input: [String: Any]) -> CodexImageAttachment? {
+        let detail = input["detail"] as? String ?? "low"
+        switch input["type"] as? String {
+        case "image":
+            guard let url = input["url"] as? String, !url.isEmpty else { return nil }
+            return CodexImageAttachment(url: url, detail: detail)
+        case "localImage":
+            guard let path = input["path"] as? String, !path.isEmpty else { return nil }
+            return CodexImageAttachment(url: "file://\(path)", detail: detail)
+        default:
+            return nil
+        }
+    }
+
     @discardableResult
-    private func append(_ kind: CodexEntryKind, title: String, text: String, itemId: String? = nil) -> CodexEntry {
-        let entry = CodexEntry(kind: kind, title: title, text: text)
+    private func append(
+        _ kind: CodexEntryKind,
+        title: String,
+        text: String,
+        itemId: String? = nil,
+        images: [CodexImageAttachment] = []
+    ) -> CodexEntry {
+        let entry = CodexEntry(kind: kind, title: title, text: text, images: images)
         entries.append(entry)
         if let itemId {
             entriesByItemId[itemId] = entry
