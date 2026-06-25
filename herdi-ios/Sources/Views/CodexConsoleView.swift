@@ -244,12 +244,6 @@ struct CodexThreadRow: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
-
-                    if !thread.model.isEmpty {
-                        Text(thread.model)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -257,17 +251,29 @@ struct CodexThreadRow: View {
 
             Spacer(minLength: 8)
 
-            Text(thread.statusLabel)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(statusColor.opacity(0.14), in: Capsule())
-                .lineLimit(1)
+            statusBadge
         }
         .padding(.vertical, 5)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var statusBadge: some View {
+        HStack(spacing: 5) {
+            if isWorking {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(statusColor)
+            }
+
+            Text(thread.statusLabel)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(statusColor)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(statusColor.opacity(0.14), in: Capsule())
     }
 
     private var accessibilityLabel: String {
@@ -297,6 +303,15 @@ struct CodexThreadRow: View {
             .red
         default:
             .secondary
+        }
+    }
+
+    private var isWorking: Bool {
+        switch thread.status {
+        case "active", "running", "in_progress":
+            true
+        default:
+            false
         }
     }
 }

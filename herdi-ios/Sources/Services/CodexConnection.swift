@@ -6,6 +6,7 @@ final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
     static let defaultCwd = "/Users/dawson/projects/hosting-platform"
     private static let cachedThreadsKey = "codex_cached_threads"
+    private static let hiddenThreadIdsKey = "codex_hidden_thread_ids"
 
     var threads: [CodexThreadSummary] = []
     var selectedThread: CodexThreadSummary?
@@ -36,6 +37,7 @@ final class CodexConnection {
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
     private var loadingAgentOrder: [String] = []
     private var freshThreadIds: Set<String> = []
+    private var hiddenThreadIds: Set<String> = []
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -46,7 +48,9 @@ final class CodexConnection {
         serverURL = defaults.string(forKey: "codex_server_url") ?? Self.defaultServerURL
         bearerToken = defaults.string(forKey: "codex_bearer_token") ?? ""
         cwd = defaults.string(forKey: "codex_cwd") ?? Self.defaultCwd
+        hiddenThreadIds = Self.loadHiddenThreadIds(from: defaults)
         threads = Self.loadCachedThreads(from: defaults)
+            .filter { !hiddenThreadIds.contains($0.id) }
     }
 
     func saveSettings() {
@@ -100,6 +104,7 @@ final class CodexConnection {
             activeThreadId = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+            transcriptRevision += 1
         }
     }
 
@@ -149,6 +154,7 @@ final class CodexConnection {
 
     func deleteThread(_ thread: CodexThreadSummary) {
         guard isConnected else { return }
+        hiddenThreadIds.insert(thread.id)
         threads.removeAll { $0.id == thread.id }
         freshThreadIds.remove(thread.id)
         if selectedThread?.id == thread.id {
@@ -158,6 +164,7 @@ final class CodexConnection {
             entriesByItemId.removeAll()
             transcriptRevision += 1
         }
+        saveHiddenThreadIds()
         saveCachedThreads()
         sendRequest(
             method: "thread/delete",
@@ -385,10 +392,17 @@ final class CodexConnection {
                 isLoadingThreads = false
                 return
             }
-            loadingAgentIds = Set(ids)
-            loadingAgentOrder = ids
+            let visibleIds = ids.filter { !hiddenThreadIds.contains($0) }
+            guard !visibleIds.isEmpty else {
+                threads = []
+                saveCachedThreads()
+                isLoadingThreads = false
+                return
+            }
+            loadingAgentIds = Set(visibleIds)
+            loadingAgentOrder = visibleIds
             loadingAgentsById.removeAll()
-            for threadId in ids {
+            for threadId in visibleIds {
                 sendRequest(
                     method: "thread/read",
                     params: ["threadId": threadId, "includeTurns": false],
@@ -399,6 +413,8 @@ final class CodexConnection {
         case "thread/start:new":
             guard let thread = result["thread"] as? [String: Any],
                   let summary = CodexThreadSummary(json: thread) else { return }
+            hiddenThreadIds.remove(summary.id)
+            saveHiddenThreadIds()
             if !threads.contains(where: { $0.id == summary.id }) {
                 threads.append(summary)
                 saveCachedThreads()
@@ -430,6 +446,7 @@ final class CodexConnection {
         case "thread/started":
             if let thread = params["thread"] as? [String: Any],
                let summary = CodexThreadSummary(json: thread),
+               !hiddenThreadIds.contains(summary.id),
                !threads.contains(where: { $0.id == summary.id }) {
                 threads.append(summary)
                 saveCachedThreads()
@@ -461,6 +478,10 @@ final class CodexConnection {
             saveCachedThreads()
 
         case "thread/unarchived":
+            if let threadId = params["threadId"] as? String {
+                hiddenThreadIds.remove(threadId)
+                saveHiddenThreadIds()
+            }
             refreshThreads()
 
         case "turn/started":
@@ -701,14 +722,14 @@ final class CodexConnection {
         var used = Set<String>()
 
         for threadId in previousOrder {
-            if let thread = loadingAgentsById[threadId] {
+            if let thread = loadingAgentsById[threadId], !hiddenThreadIds.contains(threadId) {
                 next.append(thread)
                 used.insert(threadId)
             }
         }
 
         for threadId in loadingAgentOrder where !used.contains(threadId) {
-            if let thread = loadingAgentsById[threadId] {
+            if let thread = loadingAgentsById[threadId], !hiddenThreadIds.contains(threadId) {
                 next.append(thread)
                 used.insert(threadId)
             }
@@ -726,10 +747,18 @@ final class CodexConnection {
         return cached
     }
 
+    private static func loadHiddenThreadIds(from defaults: UserDefaults) -> Set<String> {
+        Set(defaults.stringArray(forKey: hiddenThreadIdsKey) ?? [])
+    }
+
     private func saveCachedThreads() {
         if let data = try? JSONEncoder().encode(threads) {
             UserDefaults.standard.set(data, forKey: Self.cachedThreadsKey)
         }
+    }
+
+    private func saveHiddenThreadIds() {
+        UserDefaults.standard.set(Array(hiddenThreadIds), forKey: Self.hiddenThreadIdsKey)
     }
 
     @discardableResult
