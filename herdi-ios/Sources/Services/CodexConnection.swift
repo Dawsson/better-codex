@@ -31,6 +31,7 @@ final class CodexConnection {
     private var entriesByItemId: [String: CodexEntry] = [:]
     private var loadingAgentIds: Set<String> = []
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
+    private var loadingAgentOrder: [String] = []
     private var freshThreadIds: Set<String> = []
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
@@ -87,6 +88,7 @@ final class CodexConnection {
         requestKinds.removeAll()
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
+        loadingAgentOrder.removeAll()
         freshThreadIds.removeAll()
         if !keepState {
             threads.removeAll()
@@ -108,6 +110,7 @@ final class CodexConnection {
         isLoadingThreads = true
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
+        loadingAgentOrder.removeAll()
         sendRequest(
             method: "thread/loaded/list",
             params: ["limit": 80],
@@ -340,6 +343,7 @@ final class CodexConnection {
                 return
             }
             loadingAgentIds = Set(ids)
+            loadingAgentOrder = ids
             loadingAgentsById.removeAll()
             for threadId in ids {
                 sendRequest(
@@ -353,7 +357,7 @@ final class CodexConnection {
             guard let thread = result["thread"] as? [String: Any],
                   let summary = CodexThreadSummary(json: thread) else { return }
             if !threads.contains(where: { $0.id == summary.id }) {
-                threads.insert(summary, at: 0)
+                threads.append(summary)
             }
             freshThreadIds.insert(summary.id)
             selectFreshThread(summary)
@@ -383,7 +387,7 @@ final class CodexConnection {
             if let thread = params["thread"] as? [String: Any],
                let summary = CodexThreadSummary(json: thread),
                !threads.contains(where: { $0.id == summary.id }) {
-                threads.insert(summary, at: 0)
+                threads.append(summary)
             }
 
         case "thread/status/changed":
@@ -405,7 +409,7 @@ final class CodexConnection {
             isWorking = true
             if let threadId = params["threadId"] as? String {
                 activeThreadId = threadId
-                touchThread(threadId)
+                updateThreadStatus(threadId, status: "active")
             }
             if let turn = params["turn"] as? [String: Any], let id = turn["id"] as? String {
                 activeTurnId = id
@@ -589,19 +593,40 @@ final class CodexConnection {
         return activeThreadId == nil || activeThreadId == threadId
     }
 
-    private func touchThread(_ threadId: String) {
+    private func updateThreadStatus(_ threadId: String, status: String) {
         guard let index = threads.firstIndex(where: { $0.id == threadId }) else { return }
-        threads[index].status = "active"
-        let thread = threads.remove(at: index)
-        threads.insert(thread, at: 0)
+        threads[index].status = status
     }
 
     private func finishLoadingAgent(_ threadId: String) {
         loadingAgentIds.remove(threadId)
         guard loadingAgentIds.isEmpty else { return }
-        threads = loadingAgentsById.values.sorted { $0.updatedAt > $1.updatedAt }
+        mergeLoadedAgents()
         loadingAgentsById.removeAll()
+        loadingAgentOrder.removeAll()
         isLoadingThreads = false
+    }
+
+    private func mergeLoadedAgents() {
+        let previousOrder = threads.map(\.id)
+        var next: [CodexThreadSummary] = []
+        var used = Set<String>()
+
+        for threadId in previousOrder {
+            if let thread = loadingAgentsById[threadId] {
+                next.append(thread)
+                used.insert(threadId)
+            }
+        }
+
+        for threadId in loadingAgentOrder where !used.contains(threadId) {
+            if let thread = loadingAgentsById[threadId] {
+                next.append(thread)
+                used.insert(threadId)
+            }
+        }
+
+        threads = next
     }
 
     @discardableResult

@@ -165,28 +165,69 @@ struct CodexThreadRow: View {
     let thread: CodexThreadSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Text(thread.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                Spacer(minLength: 8)
-                Text(thread.relativeTime)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 10, height: 10)
+                .padding(.top, 6)
 
-            HStack(spacing: 8) {
-                Label(thread.projectName, systemImage: "folder")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 8)
-                Text(thread.status.capitalized)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    Text(thread.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(thread.statusLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                }
+
+                HStack(spacing: 8) {
+                    Label(thread.projectName, systemImage: "folder")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if let gitSummary = thread.gitSummary {
+                        Label(gitSummary, systemImage: "arrow.triangle.branch")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if !thread.preview.isEmpty {
+                    Text(thread.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Text(thread.relativeTime)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
+    }
+
+    private var statusColor: Color {
+        switch thread.status {
+        case "blocked", "waiting_for_input", "needs_input":
+            .red
+        case "active", "running", "in_progress":
+            .orange
+        case "done", "completed":
+            .green
+        case "idle":
+            .secondary
+        case "error", "failed":
+            .red
+        default:
+            .secondary
+        }
     }
 }
 

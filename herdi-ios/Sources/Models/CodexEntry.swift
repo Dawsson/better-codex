@@ -4,20 +4,35 @@ import Observation
 struct CodexThreadSummary: Identifiable, Hashable {
     let id: String
     var title: String
+    var preview: String
     var cwd: String
     var status: String
     var updatedAt: Date
     var model: String
+    var branch: String?
+    var commitsToPush: Int?
 
     init?(json: [String: Any]) {
         guard let id = json["id"] as? String else { return nil }
         self.id = id
         let preview = json["preview"] as? String
         let name = json["name"] as? String
-        self.title = (name?.isEmpty == false ? name : preview?.nilIfEmpty) ?? "Untitled agent"
+        let nickname = json["agentNickname"] as? String
         self.cwd = json["cwd"] as? String ?? ""
+        self.preview = preview ?? ""
+        let folderName = URL(fileURLWithPath: self.cwd).lastPathComponent
+        self.title = (name?.nilIfEmpty ?? nickname?.nilIfEmpty ?? folderName.nilIfEmpty) ?? "Untitled agent"
         self.status = CodexThreadSummary.status(json["status"])
         self.model = json["modelProvider"] as? String ?? ""
+        if let gitInfo = json["gitInfo"] as? [String: Any] {
+            self.branch = gitInfo["branch"] as? String
+            self.commitsToPush = CodexThreadSummary.int(gitInfo["commitsToPush"])
+                ?? CodexThreadSummary.int(gitInfo["ahead"])
+                ?? CodexThreadSummary.int(gitInfo["aheadCount"])
+        } else {
+            self.branch = nil
+            self.commitsToPush = nil
+        }
         let recency = CodexThreadSummary.timestamp(json["recencyAt"])
             ?? CodexThreadSummary.timestamp(json["updatedAt"])
             ?? CodexThreadSummary.timestamp(json["createdAt"])
@@ -29,6 +44,13 @@ struct CodexThreadSummary: Identifiable, Hashable {
         if let value = value as? Double { return value }
         if let value = value as? Int { return TimeInterval(value) }
         if let value = value as? String { return TimeInterval(value) }
+        return nil
+    }
+
+    private static func int(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? String { return Int(value) }
         return nil
     }
 
@@ -48,7 +70,33 @@ struct CodexThreadSummary: Identifiable, Hashable {
     var relativeTime: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: updatedAt, relativeTo: Date())
+        let now = Date()
+        return formatter.localizedString(for: min(updatedAt, now), relativeTo: now)
+    }
+
+    var statusLabel: String {
+        switch status {
+        case "active", "running", "in_progress":
+            "Working"
+        case "done", "completed":
+            "Done"
+        case "idle":
+            "Idle"
+        case "blocked", "waiting_for_input", "needs_input":
+            "Needs input"
+        case "error", "failed":
+            "Error"
+        default:
+            status.isEmpty ? "Unknown" : status.capitalized
+        }
+    }
+
+    var gitSummary: String? {
+        guard let branch, !branch.isEmpty else { return nil }
+        if let commitsToPush, commitsToPush > 0 {
+            return "\(branch) · \(commitsToPush) to push"
+        }
+        return branch
     }
 }
 
