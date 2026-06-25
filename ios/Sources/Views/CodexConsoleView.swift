@@ -1226,7 +1226,8 @@ enum ComposerImageProcessor {
         let encoded = jpeg.base64EncodedString()
         return CodexImageAttachment(
             url: "data:image/jpeg;base64,\(encoded)",
-            detail: "low"
+            detail: "low",
+            dataBase64: encoded
         )
     }
 

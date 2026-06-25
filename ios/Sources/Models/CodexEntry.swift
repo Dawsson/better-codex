@@ -174,11 +174,21 @@ struct CodexImageAttachment: Identifiable, Hashable {
     let id: String
     let url: String
     let detail: String
+    let dataBase64: String?
+    let localPath: String?
 
-    init(id: String = UUID().uuidString, url: String, detail: String = "low") {
+    init(
+        id: String = UUID().uuidString,
+        url: String,
+        detail: String = "low",
+        dataBase64: String? = nil,
+        localPath: String? = nil
+    ) {
         self.id = id
         self.url = url
         self.detail = detail
+        self.dataBase64 = dataBase64
+        self.localPath = localPath
     }
 }
 

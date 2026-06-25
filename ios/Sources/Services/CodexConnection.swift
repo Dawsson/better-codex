@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+private struct PendingImageTurn {
+    let threadId: String
+    let text: String
+    let images: [CodexImageAttachment]
+    var remainingImageIds: Set<String>
+    var localPathsByImageId: [String: String] = [:]
+}
+
+private struct PendingImageUpload {
+    let uploadTurnId: String
+    let imageId: String
+    let path: String
+}
+
 @Observable
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
@@ -43,6 +57,8 @@ final class CodexConnection {
     private var loadingAgentOrder: [String] = []
     private var freshThreadIds: Set<String> = []
     private var hiddenThreadIds: Set<String> = []
+    private var pendingImageTurns: [String: PendingImageTurn] = [:]
+    private var pendingImageUploads: [Int: PendingImageUpload] = [:]
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -100,6 +116,8 @@ final class CodexConnection {
         isLoadingThread = false
         connectionState = .disconnected
         requestKinds.removeAll()
+        pendingImageTurns.removeAll()
+        pendingImageUploads.removeAll()
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
         loadingAgentOrder.removeAll()
@@ -223,17 +241,46 @@ final class CodexConnection {
         freshThreadIds.remove(threadId)
         append(.user, title: "You", text: trimmed, images: images)
 
-        var input: [[String: Any]] = []
-        if !trimmed.isEmpty {
-            input.append(["type": "text", "text": trimmed, "text_elements": []])
+        let uploadableImages = images.filter { $0.dataBase64 != nil }
+        guard !uploadableImages.isEmpty else {
+            startTurn(threadId: threadId, text: trimmed, images: images)
+            return
         }
-        input.append(contentsOf: images.map { image in
-            [
-                "type": "image",
-                "url": image.url,
-                "detail": image.detail
-            ]
-        })
+
+        let uploadTurnId = UUID().uuidString
+        pendingImageTurns[uploadTurnId] = PendingImageTurn(
+            threadId: threadId,
+            text: trimmed,
+            images: images,
+            remainingImageIds: Set(uploadableImages.map(\.id))
+        )
+
+        for image in uploadableImages {
+            guard let dataBase64 = image.dataBase64 else { continue }
+            let path = "/tmp/better-codex-\(image.id).jpg"
+            let requestId = nextRequestId
+            pendingImageUploads[requestId] = PendingImageUpload(
+                uploadTurnId: uploadTurnId,
+                imageId: image.id,
+                path: path
+            )
+            sendRequest(
+                method: "fs/writeFile",
+                params: [
+                    "path": path,
+                    "dataBase64": dataBase64
+                ],
+                kind: "fs/writeFile:image"
+            )
+        }
+    }
+
+    private func startTurn(threadId: String, text: String, images: [CodexImageAttachment]) {
+        var input: [[String: Any]] = []
+        if !text.isEmpty {
+            input.append(["type": "text", "text": text, "text_elements": []])
+        }
+        input.append(contentsOf: images.compactMap(Self.inputItem))
 
         let params: [String: Any] = [
             "threadId": threadId,
@@ -376,6 +423,10 @@ final class CodexConnection {
 
         if let error = message["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Codex request failed"
+            if let upload = pendingImageUploads.removeValue(forKey: id) {
+                failPendingImageTurn(upload.uploadTurnId, message: errorMessage)
+                return
+            }
             if recoverFreshThreadError(kind: kind, message: errorMessage) {
                 return
             }
@@ -391,6 +442,11 @@ final class CodexConnection {
             if kind?.hasPrefix("thread/delete:") == true || kind?.hasPrefix("thread/name/set:") == true {
                 refreshThreads()
             }
+            return
+        }
+
+        if let upload = pendingImageUploads.removeValue(forKey: id) {
+            finishImageUpload(upload)
             return
         }
 
@@ -1025,10 +1081,57 @@ final class CodexConnection {
             return CodexImageAttachment(url: url, detail: detail)
         case "localImage":
             guard let path = input["path"] as? String, !path.isEmpty else { return nil }
-            return CodexImageAttachment(url: "file://\(path)", detail: detail)
+            return CodexImageAttachment(url: "file://\(path)", detail: detail, localPath: path)
         default:
             return nil
         }
+    }
+
+    private static func inputItem(for image: CodexImageAttachment) -> [String: Any]? {
+        if let localPath = image.localPath {
+            return [
+                "type": "localImage",
+                "path": localPath,
+                "detail": image.detail
+            ]
+        }
+
+        guard !image.url.hasPrefix("data:") else { return nil }
+        return [
+            "type": "image",
+            "url": image.url,
+            "detail": image.detail
+        ]
+    }
+
+    private func finishImageUpload(_ upload: PendingImageUpload) {
+        guard var pendingTurn = pendingImageTurns[upload.uploadTurnId] else { return }
+        pendingTurn.remainingImageIds.remove(upload.imageId)
+        pendingTurn.localPathsByImageId[upload.imageId] = upload.path
+        pendingImageTurns[upload.uploadTurnId] = pendingTurn
+
+        guard pendingTurn.remainingImageIds.isEmpty else { return }
+        pendingImageTurns.removeValue(forKey: upload.uploadTurnId)
+        let images = pendingTurn.images.map { image in
+            guard let path = pendingTurn.localPathsByImageId[image.id] else { return image }
+            return CodexImageAttachment(
+                id: image.id,
+                url: image.url,
+                detail: image.detail,
+                dataBase64: image.dataBase64,
+                localPath: path
+            )
+        }
+        startTurn(threadId: pendingTurn.threadId, text: pendingTurn.text, images: images)
+    }
+
+    private func failPendingImageTurn(_ uploadTurnId: String, message: String) {
+        pendingImageTurns.removeValue(forKey: uploadTurnId)
+        pendingImageUploads = pendingImageUploads.filter { _, upload in
+            upload.uploadTurnId != uploadTurnId
+        }
+        lastError = "Image upload failed: \(message)"
+        append(.error, title: "Image upload failed", text: message)
     }
 
     @discardableResult
@@ -1048,11 +1151,13 @@ final class CodexConnection {
         return entry
     }
 
-    private func sendRequest(method: String, params: [String: Any], kind: String) {
+    @discardableResult
+    private func sendRequest(method: String, params: [String: Any], kind: String) -> Int {
         let id = nextRequestId
         nextRequestId += 1
         requestKinds[id] = kind
         send(["id": id, "method": method, "params": params])
+        return id
     }
 
     private func sendNotification(method: String, params: [String: Any]) {
