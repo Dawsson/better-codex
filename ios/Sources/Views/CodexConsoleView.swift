@@ -1297,8 +1297,8 @@ struct MarkdownText: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(blocks.indices, id: \.self) { index in
                 switch blocks[index] {
-                case .code(let code):
-                    CodeBlockView(text: code)
+                case .code(let code, let language):
+                    CodeBlockView(text: code, language: language)
                 case .heading(let line):
                     InlineMarkdownText(line)
                         .font(.headline)
@@ -1323,14 +1323,18 @@ struct MarkdownText: View {
     private var blocks: [MarkdownBlock] {
         var result: [MarkdownBlock] = []
         var codeLines: [String] = []
+        var codeLanguage: String?
         var isInCodeBlock = false
 
         for rawLine in text.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("```") {
                 if isInCodeBlock {
-                    result.append(.code(codeLines.joined(separator: "\n")))
+                    result.append(.code(codeLines.joined(separator: "\n"), codeLanguage))
                     codeLines.removeAll()
+                    codeLanguage = nil
+                } else {
+                    codeLanguage = Self.codeLanguage(from: line)
                 }
                 isInCodeBlock.toggle()
                 continue
@@ -1354,9 +1358,19 @@ struct MarkdownText: View {
         }
 
         if !codeLines.isEmpty {
-            result.append(.code(codeLines.joined(separator: "\n")))
+            result.append(.code(codeLines.joined(separator: "\n"), codeLanguage))
         }
         return result
+    }
+
+    private static func codeLanguage(from fence: String) -> String? {
+        let language = fence
+            .dropFirst(3)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ", maxSplits: 1)
+            .first
+            .map(String.init)
+        return language?.isEmpty == false ? language : nil
     }
 }
 
@@ -1364,7 +1378,7 @@ enum MarkdownBlock {
     case paragraph(String)
     case heading(String)
     case bullet(String)
-    case code(String)
+    case code(String, String?)
 }
 
 struct InlineMarkdownText: View {
@@ -1568,16 +1582,252 @@ struct ImageAttachmentThumbnail: View {
 
 struct CodeBlockView: View {
     let text: String
+    var language: String?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            Text(text)
+            CodeHighlightText(text: text, language: language)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .padding(10)
         }
         .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct CodeHighlightText: View {
+    let text: String
+    let language: String?
+
+    var body: some View {
+        CodeHighlighter.highlight(text, language: language)
+    }
+}
+
+enum CodeHighlighter {
+    static func highlight(_ code: String, language: String?) -> Text {
+        tokens(for: code, language: normalizedLanguage(language)).reduce(Text("")) { partial, token in
+            partial + Text(token.text).foregroundColor(token.role.color)
+        }
+    }
+
+    private static func tokens(for code: String, language: String?) -> [CodeToken] {
+        if language == "diff" || codeLooksLikeDiff(code) {
+            return diffTokens(for: code)
+        }
+        if language == "json" {
+            return scan(code, language: language)
+        }
+        return scan(code, language: language)
+    }
+
+    private static func scan(_ code: String, language: String?) -> [CodeToken] {
+        var tokens: [CodeToken] = []
+        var index = code.startIndex
+        while index < code.endIndex {
+            let character = code[index]
+            let next = code.index(after: index)
+
+            if character == "/" && next < code.endIndex && code[next] == "/" {
+                let end = code[next...].firstIndex(of: "\n") ?? code.endIndex
+                tokens.append(CodeToken(String(code[index..<end]), .comment))
+                index = end
+            } else if character == "#" && (language == "sh" || language == "bash" || language == "shell" || language == "zsh") {
+                let end = code[next...].firstIndex(of: "\n") ?? code.endIndex
+                tokens.append(CodeToken(String(code[index..<end]), .comment))
+                index = end
+            } else if character == "\"" || character == "'" {
+                let end = stringEnd(in: code, from: index, quote: character)
+                tokens.append(CodeToken(String(code[index..<end]), .string))
+                index = end
+            } else if character.isNumber {
+                let end = numberEnd(in: code, from: index)
+                tokens.append(CodeToken(String(code[index..<end]), .number))
+                index = end
+            } else if character == "." || character == "/" || character == "~" {
+                let end = pathEnd(in: code, from: index)
+                let value = String(code[index..<end])
+                tokens.append(CodeToken(value, value.contains("/") ? .path : .plain))
+                index = end
+            } else if character == "-" {
+                let end = wordEnd(in: code, from: index)
+                let value = String(code[index..<end])
+                tokens.append(CodeToken(value, value.hasPrefix("-") && value.count > 1 ? .flag : .operatorToken))
+                index = end
+            } else if isOperator(character) {
+                tokens.append(CodeToken(String(character), .operatorToken))
+                index = next
+            } else if character.isLetter || character == "_" {
+                let end = wordEnd(in: code, from: index)
+                let value = String(code[index..<end])
+                tokens.append(CodeToken(value, role(forWord: value, language: language)))
+                index = end
+            } else {
+                tokens.append(CodeToken(String(character), .plain))
+                index = next
+            }
+        }
+        return tokens
+    }
+
+    private static func diffTokens(for code: String) -> [CodeToken] {
+        code.components(separatedBy: .newlines).enumerated().flatMap { index, line in
+            let role: CodeTokenRole
+            if line.hasPrefix("+") {
+                role = .addition
+            } else if line.hasPrefix("-") {
+                role = .deletion
+            } else if line.hasPrefix("@@") {
+                role = .keyword
+            } else {
+                role = .plain
+            }
+            let suffix = index == code.components(separatedBy: .newlines).indices.last ? "" : "\n"
+            return [CodeToken(line + suffix, role)]
+        }
+    }
+
+    private static func role(forWord word: String, language: String?) -> CodeTokenRole {
+        if ["true", "false", "nil", "null", "undefined"].contains(word) {
+            return .literal
+        }
+        if ["func", "let", "var", "struct", "class", "enum", "protocol", "extension", "import", "return", "if", "else", "for", "while", "switch", "case", "guard", "async", "await", "throws", "try", "private", "public", "static", "self", "in"].contains(word) {
+            return .keyword
+        }
+        if ["function", "const", "let", "var", "import", "export", "from", "return", "if", "else", "for", "while", "switch", "case", "async", "await", "class", "type", "interface", "extends"].contains(word) {
+            return .keyword
+        }
+        if ["git", "bun", "dev", "xcodebuild", "swift", "rg", "sed", "curl", "committer"].contains(word) {
+            return .command
+        }
+        if language == "json" {
+            return .plain
+        }
+        return .plain
+    }
+
+    private static func normalizedLanguage(_ language: String?) -> String? {
+        switch language?.lowercased() {
+        case "shell", "bash", "zsh", "sh", "console":
+            "sh"
+        case "js", "javascript":
+            "javascript"
+        case "ts", "typescript":
+            "typescript"
+        case "swift", "json", "diff":
+            language?.lowercased()
+        default:
+            language?.lowercased()
+        }
+    }
+
+    private static func codeLooksLikeDiff(_ code: String) -> Bool {
+        code.components(separatedBy: .newlines).contains { line in
+            line.hasPrefix("@@") || line.hasPrefix("diff --git")
+        }
+    }
+
+    private static func stringEnd(in code: String, from start: String.Index, quote: Character) -> String.Index {
+        var index = code.index(after: start)
+        var escaped = false
+        while index < code.endIndex {
+            let character = code[index]
+            index = code.index(after: index)
+            if escaped {
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == quote {
+                return index
+            }
+        }
+        return code.endIndex
+    }
+
+    private static func numberEnd(in code: String, from start: String.Index) -> String.Index {
+        var index = start
+        while index < code.endIndex {
+            let character = code[index]
+            guard character.isNumber || character == "." || character == "_" else { break }
+            index = code.index(after: index)
+        }
+        return index
+    }
+
+    private static func wordEnd(in code: String, from start: String.Index) -> String.Index {
+        var index = start
+        while index < code.endIndex {
+            let character = code[index]
+            guard character.isLetter || character.isNumber || character == "_" || character == "-" else { break }
+            index = code.index(after: index)
+        }
+        return index
+    }
+
+    private static func pathEnd(in code: String, from start: String.Index) -> String.Index {
+        var index = start
+        while index < code.endIndex {
+            let character = code[index]
+            guard !character.isWhitespace && !["\"", "'", "`", ")", "]", "}"].contains(character) else { break }
+            index = code.index(after: index)
+        }
+        return index
+    }
+
+    private static func isOperator(_ character: Character) -> Bool {
+        ["=", "+", "*", "%", "!", "<", ">", "|", "&", ":", ",", ";", "(", ")", "{", "}", "[", "]"].contains(character)
+    }
+}
+
+struct CodeToken {
+    let text: String
+    let role: CodeTokenRole
+
+    init(_ text: String, _ role: CodeTokenRole) {
+        self.text = text
+        self.role = role
+    }
+}
+
+enum CodeTokenRole {
+    case plain
+    case keyword
+    case string
+    case number
+    case literal
+    case comment
+    case command
+    case flag
+    case path
+    case operatorToken
+    case addition
+    case deletion
+
+    var color: Color {
+        switch self {
+        case .plain:
+            Color.primary.opacity(0.90)
+        case .keyword:
+            Color(red: 0.64, green: 0.56, blue: 0.86)
+        case .string:
+            Color(red: 0.48, green: 0.68, blue: 0.42)
+        case .number, .literal:
+            Color(red: 0.80, green: 0.50, blue: 0.48)
+        case .comment:
+            Color.secondary.opacity(0.78)
+        case .command:
+            Color(red: 0.45, green: 0.64, blue: 0.86)
+        case .flag:
+            Color(red: 0.82, green: 0.60, blue: 0.38)
+        case .path:
+            Color(red: 0.45, green: 0.68, blue: 0.74)
+        case .operatorToken:
+            Color.secondary.opacity(0.72)
+        case .addition:
+            Color(red: 0.34, green: 0.70, blue: 0.45)
+        case .deletion:
+            Color(red: 0.86, green: 0.40, blue: 0.40)
+        }
     }
 }
 
