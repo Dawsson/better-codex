@@ -573,49 +573,101 @@ struct CodexEntryRow: View {
 struct ExplorationRunView: View {
     let entry: CodexEntry
 
-    private var lines: [String] {
+    private var items: [ExplorationDisplayItem] {
         entry.text
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .map(String.init)
+            .map { ExplorationDisplayItem(String($0)) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder.badge.magnifyingglass")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.cyan)
-
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
                 Text(entry.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
 
-            HStack(alignment: .top, spacing: 9) {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.22))
-                    .frame(width: 1)
-                    .padding(.vertical, 5)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text(index == lines.indices.last ? "└" : "├")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary.opacity(0.7))
-
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    ExplorationTimelineRow(
+                        item: item,
+                        isLast: index == items.indices.last
+                    )
                 }
             }
-            .padding(.leading, 5)
         }
         .padding(.vertical, 2)
+    }
+}
+
+struct ExplorationTimelineRow: View {
+    let item: ExplorationDisplayItem
+    let isLast: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(item.tint.opacity(0.22))
+                    .overlay {
+                        Circle()
+                            .stroke(item.tint.opacity(0.45), lineWidth: 1)
+                    }
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 6)
+
+                if !isLast {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(width: 1)
+                }
+            }
+            .frame(width: 12)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(item.action)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+            .padding(.bottom, isLast ? 0 : 7)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct ExplorationDisplayItem {
+    let action: String
+    let detail: String
+
+    init(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let firstSpace = trimmed.firstIndex(where: { $0.isWhitespace }) {
+            self.action = String(trimmed[..<firstSpace])
+            self.detail = String(trimmed[firstSpace...]).trimmingCharacters(in: .whitespaces)
+        } else {
+            self.action = trimmed
+            self.detail = ""
+        }
+    }
+
+    var tint: Color {
+        switch action {
+        case "Read":
+            .cyan
+        case "Search", "Find":
+            .blue
+        case "List":
+            .purple
+        default:
+            .secondary
+        }
     }
 }
 

@@ -29,17 +29,6 @@ sessions feel calm, readable, and useful on mobile.
 Open `herdi-ios/Herdi.xcodeproj` in Xcode, select the `Herdi` scheme, and run it
 on your device.
 
-For CLI builds against an iOS beta device:
-
-```sh
-DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer" \
-  xcodebuild -scheme Herdi \
-  -project herdi-ios/Herdi.xcodeproj \
-  -configuration Debug \
-  -destination 'platform=iOS' \
-  build
-```
-
 ## Status
 
 This is pre-release software. The iOS app is the active surface; older Herdr
