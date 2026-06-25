@@ -24,6 +24,10 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: Better Codex
+        CFBundleURLTypes:
+          - CFBundleURLName: com.dawson.bettercodex.configure
+            CFBundleURLSchemes:
+              - bettercodex
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: "Better Codex connects to your Codex app-server on your private network."
         NSSupportsLiveActivities: true

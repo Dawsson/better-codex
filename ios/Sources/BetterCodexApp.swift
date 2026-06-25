@@ -18,6 +18,9 @@ struct BetterCodexApp: App {
                         codex.reconnectIfNeeded()
                     }
                 }
+                .onOpenURL { url in
+                    codex.configure(from: url)
+                }
         }
     }
 }

@@ -81,6 +81,30 @@ final class CodexConnection {
         defaults.set(cwd, forKey: "codex_cwd")
     }
 
+    func configure(from url: URL) {
+        guard url.scheme == "bettercodex", url.host == "configure" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+
+        let values = Dictionary(
+            uniqueKeysWithValues: components.queryItems?.compactMap { item in
+                item.value.map { (item.name, $0) }
+            } ?? []
+        )
+
+        if let server = values["server"], URL(string: server) != nil {
+            serverURL = server
+        }
+        if let token = values["token"], !token.isEmpty {
+            bearerToken = token
+        }
+        if let configuredCwd = values["cwd"], !configuredCwd.isEmpty {
+            cwd = configuredCwd
+        }
+
+        saveSettings()
+        connect()
+    }
+
     func connect() {
         guard let url = URL(string: serverURL) else {
             lastError = "Invalid Codex server URL"
@@ -314,7 +338,10 @@ final class CodexConnection {
                     "title": "Better Codex iOS",
                     "version": "0.1.0"
                 ],
-                "capabilities": ["experimentalApi": true]
+                "capabilities": [
+                    "experimentalApi": true,
+                    "requestAttestation": false
+                ]
             ],
             kind: "initialize"
         )
