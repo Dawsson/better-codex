@@ -653,41 +653,78 @@ struct GitActionsSheet: View {
         dismiss()
     }
 
+    private var quotedCwd: String {
+        shellQuote(thread.cwd)
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
     private var gitInspectPrompt: String {
         """
-        Inspect the git state for this workspace. Run focused git commands like `git status --short --branch`, summarize changed files, untracked files, branch/ahead state, and whether it is ready to commit or push. Do not commit or push yet.
+        Run this exact git inspection in this workspace and show the results:
+
+        cd \(quotedCwd)
+        git status --short --branch
+        git diff --stat
+        git diff --name-status
+        git diff --cached --stat
+
+        Summarize changed files, untracked files, branch/ahead state, and whether it is ready to commit or push. Do not commit or push.
         """
     }
 
     private var commitMessagePrompt: String {
         """
-        Inspect the current git diff and propose one concise commit message. Do not commit yet. Return the message plainly first, then a short note about why it fits.
+        Inspect the git status and diff in \(thread.cwd), then propose one concise commit message. Do not commit.
+
+        Run:
+        cd \(quotedCwd)
+        git status --short --branch
+        git diff --stat
+        git diff --name-status
+
+        Return the message plainly first, then a short note about why it fits.
         """
     }
 
     private var commitPrompt: String {
         let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         return """
-        Commit the current intended changes with this commit message:
+        In \(thread.cwd), commit the intended current changes with this message:
         \(message)
 
-        Use the repo's normal commit workflow. Review `git status --short --branch` first, include only relevant changed files, and do not push.
+        Run `git status --short --branch` first. Use the repo's required commit tool if present:
+        committer \(shellQuote(message)) <explicit changed files>
+
+        List every intended changed file explicitly. Do not use `git add .`. Do not include unrelated files. Do not push.
         """
     }
 
     private var pushPrompt: String {
         """
-        Check the current branch and push it to its upstream. If there is no upstream, explain the safest push command before running it.
+        In \(thread.cwd), check the current branch and push it to its upstream.
+
+        Run:
+        cd \(quotedCwd)
+        git status --short --branch
+        git branch --show-current
+
+        If there is no upstream, explain the safest push command before running it.
         """
     }
 
     private var commitAndPushPrompt: String {
         let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         return """
-        Review the current git state, commit the intended changes with this commit message, then push the branch:
+        In \(thread.cwd), review the current git state, commit the intended changes with this commit message, then push the branch:
         \(message)
 
-        Use the repo's normal commit workflow and avoid unrelated files.
+        Run `git status --short --branch` first. Use the repo's required commit tool if present:
+        committer \(shellQuote(message)) <explicit changed files>
+
+        List every intended changed file explicitly. Do not use `git add .`. Do not include unrelated files. Push only after the commit succeeds.
         """
     }
 }
@@ -1159,10 +1196,27 @@ struct CommandOutputPreview: View {
 struct DiffChangeView: View {
     @Bindable var entry: CodexEntry
 
+    private var diffText: String {
+        entry.detail.isEmpty ? entry.text : entry.detail
+    }
+
+    private var files: [ParsedDiffFile] {
+        ParsedDiffFile.parse(diffText)
+    }
+
     var body: some View {
         DisclosureGroup(isExpanded: $entry.isExpanded) {
-            CodeBlockView(text: entry.detail.isEmpty ? entry.text : entry.detail, language: "diff")
+            if files.isEmpty {
+                CodeBlockView(text: diffText, language: "diff")
+                    .padding(.top, 8)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(files) { file in
+                        ParsedDiffFileView(file: file)
+                    }
+                }
                 .padding(.top, 8)
+            }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -1183,6 +1237,192 @@ struct DiffChangeView: View {
         }
         .padding(.vertical, 3)
         .tint(Color.secondary.opacity(0.58))
+    }
+}
+
+struct ParsedDiffFile: Identifiable {
+    let id = UUID()
+    var path: String
+    var lines: [ParsedDiffLine]
+
+    var addedCount: Int {
+        lines.filter { $0.kind == .addition }.count
+    }
+
+    var removedCount: Int {
+        lines.filter { $0.kind == .removal }.count
+    }
+
+    static func parse(_ text: String) -> [ParsedDiffFile] {
+        let rawLines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard rawLines.contains(where: { $0.hasPrefix("diff --git ") || $0.hasPrefix("@@ ") || $0.hasPrefix("--- ") || $0.hasPrefix("+++ ") }) else {
+            return []
+        }
+
+        var files: [ParsedDiffFile] = []
+        var currentPath = "Changes"
+        var currentLines: [ParsedDiffLine] = []
+        var sawFileHeader = false
+
+        func flush() {
+            guard !currentLines.isEmpty else { return }
+            files.append(ParsedDiffFile(path: currentPath, lines: currentLines))
+            currentLines = []
+        }
+
+        for line in rawLines {
+            if line.hasPrefix("diff --git ") {
+                flush()
+                currentPath = pathFromGitHeader(line) ?? "Changes"
+                sawFileHeader = true
+                continue
+            }
+
+            if line.hasPrefix("+++ ") {
+                if let path = pathFromMarker(line), path != "/dev/null" {
+                    currentPath = path
+                    sawFileHeader = true
+                }
+                continue
+            }
+
+            if line.hasPrefix("--- ") {
+                if !sawFileHeader, let path = pathFromMarker(line), path != "/dev/null" {
+                    currentPath = path
+                }
+                continue
+            }
+
+            if line.hasPrefix("@@") {
+                currentLines.append(ParsedDiffLine(text: line, kind: .hunk))
+            } else if line.hasPrefix("+") {
+                currentLines.append(ParsedDiffLine(text: line, kind: .addition))
+            } else if line.hasPrefix("-") {
+                currentLines.append(ParsedDiffLine(text: line, kind: .removal))
+            } else if line.hasPrefix("index ") || line.hasPrefix("new file mode ") || line.hasPrefix("deleted file mode ") {
+                currentLines.append(ParsedDiffLine(text: line, kind: .metadata))
+            } else if !line.isEmpty {
+                currentLines.append(ParsedDiffLine(text: line, kind: .context))
+            }
+        }
+
+        flush()
+        return files
+    }
+
+    private static func pathFromGitHeader(_ line: String) -> String? {
+        let parts = line.split(separator: " ").map(String.init)
+        guard parts.count >= 4 else { return nil }
+        return cleanPath(parts[3])
+    }
+
+    private static func pathFromMarker(_ line: String) -> String? {
+        let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        return cleanPath(parts[1])
+    }
+
+    private static func cleanPath(_ path: String) -> String {
+        path
+            .replacingOccurrences(of: "a/", with: "", options: [.anchored])
+            .replacingOccurrences(of: "b/", with: "", options: [.anchored])
+    }
+}
+
+struct ParsedDiffLine: Identifiable {
+    let id = UUID()
+    var text: String
+    var kind: ParsedDiffLineKind
+}
+
+enum ParsedDiffLineKind {
+    case addition
+    case removal
+    case hunk
+    case metadata
+    case context
+
+    var foreground: Color {
+        switch self {
+        case .addition:
+            return .green
+        case .removal:
+            return .red
+        case .hunk:
+            return .blue
+        case .metadata:
+            return .secondary
+        case .context:
+            return .primary
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .addition:
+            return Color.green.opacity(0.10)
+        case .removal:
+            return Color.red.opacity(0.10)
+        case .hunk:
+            return Color.blue.opacity(0.10)
+        case .metadata:
+            return Color.secondary.opacity(0.08)
+        case .context:
+            return Color.clear
+        }
+    }
+}
+
+struct ParsedDiffFileView: View {
+    let file: ParsedDiffFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.plaintext")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(file.path)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if file.addedCount > 0 {
+                    Text("+\(file.addedCount)")
+                        .foregroundStyle(.green)
+                }
+                if file.removedCount > 0 {
+                    Text("-\(file.removedCount)")
+                        .foregroundStyle(.red)
+                }
+            }
+            .font(.caption2.monospacedDigit())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(file.lines) { line in
+                        Text(line.text)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(line.kind.foreground)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(line.kind.background)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(.vertical, 6)
+            }
+            .background(Color(.tertiarySystemBackground).opacity(0.72))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        }
     }
 }
 

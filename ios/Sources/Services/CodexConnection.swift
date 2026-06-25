@@ -245,7 +245,7 @@ final class CodexConnection {
             method: "thread/resume",
             params: [
                 "threadId": thread.id,
-                "cwd": cwd,
+                "cwd": thread.cwd.isEmpty ? cwd : thread.cwd,
                 "approvalPolicy": "never",
                 "sandbox": "danger-full-access"
             ],
@@ -309,7 +309,7 @@ final class CodexConnection {
         let params: [String: Any] = [
             "threadId": threadId,
             "input": input,
-            "cwd": cwd,
+            "cwd": activeWorkingDirectory,
             "approvalPolicy": "never",
             "sandboxPolicy": ["type": "dangerFullAccess"]
         ]
@@ -840,6 +840,18 @@ final class CodexConnection {
         return activeThreadId == nil || activeThreadId == threadId
     }
 
+    private var activeWorkingDirectory: String {
+        if let selectedCwd = selectedThread?.cwd, !selectedCwd.isEmpty {
+            return selectedCwd
+        }
+        if let activeThreadId,
+           let threadCwd = threads.first(where: { $0.id == activeThreadId })?.cwd,
+           !threadCwd.isEmpty {
+            return threadCwd
+        }
+        return cwd
+    }
+
     private func upsertExplorationItem(id: String, label: String) {
         explorationItemIds.insert(id)
         if !explorationItemOrder.contains(id) {
@@ -1072,6 +1084,10 @@ final class CodexConnection {
     }
 
     private func fileChangeSummary(from value: [String: Any]) -> String {
+        if let files = fileChangePaths(from: value), !files.isEmpty {
+            if files.count == 1 { return files[0] }
+            return "\(files.count) files"
+        }
         if let path = stringValue(for: ["path", "file", "filePath", "target", "targetPath"], in: value) {
             return path
         }
@@ -1082,17 +1098,72 @@ final class CodexConnection {
     }
 
     private func diffText(from value: [String: Any]) -> String {
-        if let diff = stringValue(for: ["diff", "patch", "unifiedDiff", "changes", "content", "text"], in: value), !diff.isEmpty {
+        if let diff = stringValue(for: ["diff", "patch", "unifiedDiff"], in: value), !diff.isEmpty {
             return diff
         }
-        if let files = value["files"] as? [[String: Any]] {
-            return files.map { file in
-                let title = fileChangeSummary(from: file)
-                let diff = diffText(from: file)
-                return diff.isEmpty ? title : "\(title)\n\(diff)"
-            }.joined(separator: "\n\n")
+        if let sections = diffSections(from: value), !sections.isEmpty {
+            return sections.joined(separator: "\n\n")
         }
-        return String(describing: value)
+        if let text = stringValue(for: ["content", "text", "message"], in: value), !text.isEmpty {
+            return text
+        }
+        return fileChangeSummary(from: value)
+    }
+
+    private func diffSections(from value: [String: Any]) -> [String]? {
+        for key in ["files", "changes", "edits", "operations"] {
+            if let files = value[key] as? [[String: Any]] {
+                return files.compactMap(diffSection)
+            }
+            if let dict = value[key] as? [String: Any] {
+                return dict.map { path, payload in
+                    if let file = payload as? [String: Any] {
+                        let body = diffText(from: file)
+                        return body.contains("diff --git") || body.contains("@@")
+                            ? body
+                            : "\(path)\n\(body)"
+                    }
+                    if let text = payload as? String, !text.isEmpty {
+                        return "\(path)\n\(text)"
+                    }
+                    return path
+                }
+            }
+        }
+        return nil
+    }
+
+    private func diffSection(from value: [String: Any]) -> String? {
+        let title = fileChangeSummary(from: value)
+        if let diff = stringValue(for: ["diff", "patch", "unifiedDiff"], in: value), !diff.isEmpty {
+            return diff.contains("diff --git") || diff.contains("@@") ? diff : "\(title)\n\(diff)"
+        }
+        let before = stringValue(for: ["before", "old", "oldText", "previous"], in: value)
+        let after = stringValue(for: ["after", "new", "newText", "current"], in: value)
+        if before != nil || after != nil {
+            var lines = [title]
+            if let before { lines.append("--- before\n\(before)") }
+            if let after { lines.append("+++ after\n\(after)") }
+            return lines.joined(separator: "\n")
+        }
+        if let summary = stringValue(for: ["summary", "description", "operation", "action"], in: value) {
+            return "\(title)\n\(summary)"
+        }
+        return nil
+    }
+
+    private func fileChangePaths(from value: [String: Any]) -> [String]? {
+        for key in ["files", "changes", "edits", "operations"] {
+            if let files = value[key] as? [[String: Any]] {
+                return files.compactMap { file in
+                    stringValue(for: ["path", "file", "filePath", "target", "targetPath"], in: file)
+                }
+            }
+            if let dict = value[key] as? [String: Any] {
+                return Array(dict.keys).sorted()
+            }
+        }
+        return nil
     }
 
     private func genericDisplaySummary(from item: [String: Any]) -> String {
