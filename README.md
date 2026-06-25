@@ -19,20 +19,16 @@ sessions feel calm, readable, and useful on mobile.
 
 ## Layout
 
-- `herdi-ios/` - SwiftUI iOS app.
-- `herdi-mac/` - macOS menu bar app experiments.
-- `relay/` and `web/` - older relay/web surfaces kept while the project moves
-  toward direct Codex app-server support.
+- `ios/` - SwiftUI iOS app.
 
 ## Build The iOS App
 
-Open `herdi-ios/Herdi.xcodeproj` in Xcode, select the `Herdi` scheme, and run it
-on your device.
+Open `ios/BetterCodex.xcodeproj` in Xcode, select the `BetterCodex` scheme, and
+run it on your device.
 
 ## Status
 
-This is pre-release software. The iOS app is the active surface; older Herdr
-relay pieces are still present but are no longer the main direction.
+This is pre-release software. The iOS app is the active surface.
 
 ## License
 

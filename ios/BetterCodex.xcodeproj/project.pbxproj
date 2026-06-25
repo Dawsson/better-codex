@@ -1,0 +1,491 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0E2C8AC44B6B4E2FBED7E111 /* CodexEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2C8AC44B6B4E2FBED7E110 /* CodexEntry.swift */; };
+		2A8939670013BFA3E2EB39B7 /* BetterCodexWidgetAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7C5183B1653B42B1C77AD8 /* BetterCodexWidgetAttributes.swift */; };
+		41F2689411C74C60A8F85E11 /* CodexConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F2689411C74C60A8F85E10 /* CodexConsoleView.swift */; };
+		47597ABF9CD8F7DEFE061679 /* BetterCodexWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EC93D9A3E27B0771C137F83D /* BetterCodexWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		58C016C4275B4ACAB561C511 /* CodexConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C016C4275B4ACAB561C510 /* CodexConnection.swift */; };
+		6E7C3DA9191E67FE14B3DCF0 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83DB56BDBD9553A3E184E194 /* HapticManager.swift */; };
+		6E9EEC03296AC35411AACEB6 /* BetterCodexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABA323EA8BE5472CB088D16A /* BetterCodexApp.swift */; };
+		7143B1689672771C44B0A7EC /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8E1DF39476827259AA5464 /* NotificationManager.swift */; };
+		7B1119E3FE301FC928744C26 /* BetterCodexLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3798DD38209CA6F91010393F /* BetterCodexLiveActivity.swift */; };
+		B5CAF3FC4E537F972693187F /* BetterCodexWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56124C88E546EE7E002F4A46 /* BetterCodexWidget.swift */; };
+		E79A34B670080789F3612876 /* BetterCodexWidgetAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7C5183B1653B42B1C77AD8 /* BetterCodexWidgetAttributes.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3B45B72AD2BB7F435E50D66E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 09153EE9F2F50234B35FCF73 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3FADACFEBCCBBB796C8B02C;
+			remoteInfo = BetterCodexWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EA0CB9729D6998B220642C3A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				47597ABF9CD8F7DEFE061679 /* BetterCodexWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		3798DD38209CA6F91010393F /* BetterCodexLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterCodexLiveActivity.swift; sourceTree = "<group>"; };
+		3D8E1DF39476827259AA5464 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		41F2689411C74C60A8F85E10 /* CodexConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConsoleView.swift; sourceTree = "<group>"; };
+		56124C88E546EE7E002F4A46 /* BetterCodexWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterCodexWidget.swift; sourceTree = "<group>"; };
+		58C016C4275B4ACAB561C510 /* CodexConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConnection.swift; sourceTree = "<group>"; };
+		77C435C9B1224D4C9986379A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0E2C8AC44B6B4E2FBED7E110 /* CodexEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexEntry.swift; sourceTree = "<group>"; };
+		83DB56BDBD9553A3E184E194 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		844E00E2F37305856F5D3421 /* BetterCodex.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BetterCodex.entitlements; sourceTree = "<group>"; };
+		ABA323EA8BE5472CB088D16A /* BetterCodexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterCodexApp.swift; sourceTree = "<group>"; };
+		AD7C5183B1653B42B1C77AD8 /* BetterCodexWidgetAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterCodexWidgetAttributes.swift; sourceTree = "<group>"; };
+		D014A68D6F9C98ED18139A7D /* BetterCodex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BetterCodex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2BDCFB91186CD15A970E21F /* BetterCodexWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BetterCodexWidget.entitlements; sourceTree = "<group>"; };
+		EC93D9A3E27B0771C137F83D /* BetterCodexWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterCodexWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		FDCAF4F9B7C580C2B742FF53 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		090D1C7627505F39CF27970D /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				41F2689411C74C60A8F85E10 /* CodexConsoleView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		48188E7315A33686B68DA8E0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D014A68D6F9C98ED18139A7D /* BetterCodex.app */,
+				EC93D9A3E27B0771C137F83D /* BetterCodexWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5B4BB80A3427F437E06F8551 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				83DB56BDBD9553A3E184E194 /* HapticManager.swift */,
+				3D8E1DF39476827259AA5464 /* NotificationManager.swift */,
+				58C016C4275B4ACAB561C510 /* CodexConnection.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		60B64B4AA14798CC40D6D489 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				3798DD38209CA6F91010393F /* BetterCodexLiveActivity.swift */,
+				AD7C5183B1653B42B1C77AD8 /* BetterCodexWidgetAttributes.swift */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
+		7792E9A4B3FC5F0D0A22FEC4 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				0E2C8AC44B6B4E2FBED7E110 /* CodexEntry.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		7882C44117558D138D2EDEFD /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				844E00E2F37305856F5D3421 /* BetterCodex.entitlements */,
+				ABA323EA8BE5472CB088D16A /* BetterCodexApp.swift */,
+				D2BDCFB91186CD15A970E21F /* BetterCodexWidget.entitlements */,
+				FDCAF4F9B7C580C2B742FF53 /* Info.plist */,
+				60B64B4AA14798CC40D6D489 /* LiveActivity */,
+				7792E9A4B3FC5F0D0A22FEC4 /* Models */,
+				5B4BB80A3427F437E06F8551 /* Services */,
+				090D1C7627505F39CF27970D /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		F0437CD911CA8368512C86CB /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				77C435C9B1224D4C9986379A /* Info.plist */,
+				56124C88E546EE7E002F4A46 /* BetterCodexWidget.swift */,
+			);
+			name = Widget;
+			path = Sources/Widget;
+			sourceTree = "<group>";
+		};
+		F7FBDAF5F69A3615D3E175FA = {
+			isa = PBXGroup;
+			children = (
+				7882C44117558D138D2EDEFD /* Sources */,
+				F0437CD911CA8368512C86CB /* Widget */,
+				48188E7315A33686B68DA8E0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7DC55FAFD463FA6AEF13E6A2 /* BetterCodex */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB5A6798762BB5AC51772127 /* Build configuration list for PBXNativeTarget "BetterCodex" */;
+			buildPhases = (
+				AA5D9B5CACD21791EA1DBDEA /* Sources */,
+				EA0CB9729D6998B220642C3A /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0F91E314E9CC1B7C69F4B061 /* PBXTargetDependency */,
+			);
+			name = BetterCodex;
+			packageProductDependencies = (
+			);
+			productName = BetterCodex;
+			productReference = D014A68D6F9C98ED18139A7D /* BetterCodex.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B3FADACFEBCCBBB796C8B02C /* BetterCodexWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F3072E631CB490EE156E10B1 /* Build configuration list for PBXNativeTarget "BetterCodexWidget" */;
+			buildPhases = (
+				458A4334212D0108C2FF5B42 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BetterCodexWidget;
+			packageProductDependencies = (
+			);
+			productName = BetterCodexWidget;
+			productReference = EC93D9A3E27B0771C137F83D /* BetterCodexWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		09153EE9F2F50234B35FCF73 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					B3FADACFEBCCBBB796C8B02C = {
+						DevelopmentTeam = LX87B9XUSL;
+					};
+				};
+			};
+			buildConfigurationList = F5F5D8B7C61D3FAB724AF3E3 /* Build configuration list for PBXProject "BetterCodex" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = F7FBDAF5F69A3615D3E175FA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 48188E7315A33686B68DA8E0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7DC55FAFD463FA6AEF13E6A2 /* BetterCodex */,
+				B3FADACFEBCCBBB796C8B02C /* BetterCodexWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		458A4334212D0108C2FF5B42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B5CAF3FC4E537F972693187F /* BetterCodexWidget.swift in Sources */,
+				E79A34B670080789F3612876 /* BetterCodexWidgetAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA5D9B5CACD21791EA1DBDEA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				41F2689411C74C60A8F85E11 /* CodexConsoleView.swift in Sources */,
+				58C016C4275B4ACAB561C511 /* CodexConnection.swift in Sources */,
+				0E2C8AC44B6B4E2FBED7E111 /* CodexEntry.swift in Sources */,
+				6E7C3DA9191E67FE14B3DCF0 /* HapticManager.swift in Sources */,
+				6E9EEC03296AC35411AACEB6 /* BetterCodexApp.swift in Sources */,
+				7B1119E3FE301FC928744C26 /* BetterCodexLiveActivity.swift in Sources */,
+				2A8939670013BFA3E2EB39B7 /* BetterCodexWidgetAttributes.swift in Sources */,
+				7143B1689672771C44B0A7EC /* NotificationManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0F91E314E9CC1B7C69F4B061 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3FADACFEBCCBBB796C8B02C /* BetterCodexWidget */;
+			targetProxy = 3B45B72AD2BB7F435E50D66E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		23AB4CA2F0D9EB1A4248AF06 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5266967D19DE00FF9A531DA6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/BetterCodexWidget.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LX87B9XUSL;
+				INFOPLIST_FILE = Sources/Widget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dawson.bettercodex.widget;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		65994080AF7CB9671DAD277D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BetterCodex.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LX87B9XUSL;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dawson.bettercodex;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6D81702BC2C7A5CCC6B4DC03 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BetterCodex.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LX87B9XUSL;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dawson.bettercodex;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		766B45278F2F43968D3D7024 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		DAFD0DA56546271E9C235A15 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/BetterCodexWidget.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LX87B9XUSL;
+				INFOPLIST_FILE = Sources/Widget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dawson.bettercodex.widget;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AB5A6798762BB5AC51772127 /* Build configuration list for PBXNativeTarget "BetterCodex" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				65994080AF7CB9671DAD277D /* Debug */,
+				6D81702BC2C7A5CCC6B4DC03 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F3072E631CB490EE156E10B1 /* Build configuration list for PBXNativeTarget "BetterCodexWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DAFD0DA56546271E9C235A15 /* Debug */,
+				5266967D19DE00FF9A531DA6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F5F5D8B7C61D3FAB724AF3E3 /* Build configuration list for PBXProject "BetterCodex" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				23AB4CA2F0D9EB1A4248AF06 /* Debug */,
+				766B45278F2F43968D3D7024 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 09153EE9F2F50234B35FCF73 /* Project object */;
+}

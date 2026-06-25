@@ -1,17 +1,14 @@
 # Better Codex Agent Instructions
 
-Better Codex is Dawson's local mobile/desktop client for controlling Codex
-app-server sessions over Tailscale. Keep it focused on Codex workflows, not
-Herdr compatibility.
+Better Codex is a native client for controlling Codex app-server sessions over
+private networks like Tailscale. Keep it focused on Codex workflows.
 
 ## Product Direction
 
 - The iOS app should feel like a compact Codex mobile client: list sessions,
   open a session, see streamed agent activity, and send follow-up messages.
-- Prefer Codex app-server JSON-RPC APIs directly over relay-specific adapters.
-- Keep Herdr/Herdi compatibility code only while it helps migration. New
-  behavior should use Codex terms: threads, turns, items, commands, output, and
-  approvals.
+- Prefer Codex app-server JSON-RPC APIs directly.
+- Use Codex terms: threads, turns, items, commands, output, and approvals.
 - Default to the Mac-hosted `codex-lb` app-server on Tailscale. Do not expose
   unauthenticated WebSocket listeners.
 
@@ -27,8 +24,6 @@ Herdr compatibility.
 
 ## Validation
 
-- Build with Xcode beta when the connected iPhone is on an iOS beta:
-  `DEVELOPER_DIR="/Users/dawson/Downloads/Xcode-beta.app/Contents/Developer"`.
 - Validate app-server changes with an authenticated WebSocket smoke test when
   protocol behavior changes.
 - Prefer focused iOS builds and device installs over broad repo checks.
