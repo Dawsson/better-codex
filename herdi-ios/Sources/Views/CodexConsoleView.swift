@@ -27,6 +27,9 @@ struct CodexConsoleView: View {
 struct CodexThreadListView: View {
     @Environment(CodexConnection.self) private var codex
     @Binding var showSettings: Bool
+    @State private var renamingThread: CodexThreadSummary?
+    @State private var renameText = ""
+    @State private var showRenameAlert = false
 
     var body: some View {
         List {
@@ -58,6 +61,23 @@ struct CodexThreadListView: View {
                         CodexThreadRow(thread: thread)
                     }
                     .listRowBackground(Color.clear)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            codex.deleteThread(thread)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+
+                        Button {
+                            renamingThread = thread
+                            renameText = thread.title
+                            showRenameAlert = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
                 }
             }
         }
@@ -102,6 +122,15 @@ struct CodexThreadListView: View {
         }
         .refreshable {
             codex.refreshThreads()
+        }
+        .alert("Rename Agent", isPresented: $showRenameAlert) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                guard let renamingThread else { return }
+                codex.renameThread(renamingThread, name: renameText)
+            }
+            .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 

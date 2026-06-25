@@ -133,6 +133,39 @@ final class CodexConnection {
         sendRequest(method: "thread/start", params: params, kind: "thread/start:new")
     }
 
+    func renameThread(_ thread: CodexThreadSummary, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isConnected, !trimmed.isEmpty else { return }
+        if let index = threads.firstIndex(where: { $0.id == thread.id }) {
+            threads[index].title = trimmed
+            saveCachedThreads()
+        }
+        sendRequest(
+            method: "thread/name/set",
+            params: ["threadId": thread.id, "name": trimmed],
+            kind: "thread/name/set:\(thread.id)"
+        )
+    }
+
+    func deleteThread(_ thread: CodexThreadSummary) {
+        guard isConnected else { return }
+        threads.removeAll { $0.id == thread.id }
+        freshThreadIds.remove(thread.id)
+        if selectedThread?.id == thread.id {
+            selectedThread = nil
+            activeThreadId = nil
+            entries.removeAll()
+            entriesByItemId.removeAll()
+            transcriptRevision += 1
+        }
+        saveCachedThreads()
+        sendRequest(
+            method: "thread/delete",
+            params: ["threadId": thread.id],
+            kind: "thread/delete:\(thread.id)"
+        )
+    }
+
     func openThread(_ thread: CodexThreadSummary) {
         if freshThreadIds.contains(thread.id) {
             selectFreshThread(thread)
@@ -328,6 +361,9 @@ final class CodexConnection {
                 finishLoadingAgent(threadId)
             }
             if kind?.hasPrefix("thread/read:") == true { isLoadingThread = false }
+            if kind?.hasPrefix("thread/delete:") == true || kind?.hasPrefix("thread/name/set:") == true {
+                refreshThreads()
+            }
             return
         }
 
@@ -403,6 +439,17 @@ final class CodexConnection {
             guard let threadId = params["threadId"] as? String else { return }
             if let index = threads.firstIndex(where: { $0.id == threadId }) {
                 threads[index].status = CodexThreadSummary.status(params["status"])
+                saveCachedThreads()
+            } else {
+                refreshThreads()
+            }
+
+        case "thread/name/updated":
+            guard let threadId = params["threadId"] as? String else { return }
+            let threadName = params["threadName"] as? String
+            if let index = threads.firstIndex(where: { $0.id == threadId }) {
+                let trimmedName = threadName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                threads[index].title = trimmedName.isEmpty ? threads[index].projectName : trimmedName
                 saveCachedThreads()
             } else {
                 refreshThreads()
