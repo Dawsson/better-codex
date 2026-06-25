@@ -1083,38 +1083,58 @@ struct DiffChangeView: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $entry.isExpanded) {
-            if files.isEmpty {
-                CodeBlockView(text: diffText, language: "diff")
-                    .padding(.top, 8)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(files) { file in
-                        ParsedDiffFileView(file: file)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    entry.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: entry.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    Text(entry.title.isEmpty ? "Changes" : entry.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if !entry.text.isEmpty, entry.text != entry.detail {
+                        Text(entry.text)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
                     }
+                    Spacer(minLength: 0)
                 }
-                .padding(.top, 8)
+                .contentShape(Rectangle())
             }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                Text(entry.title.isEmpty ? "Changes" : entry.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                if !entry.text.isEmpty, entry.text != entry.detail {
-                    Text(entry.text)
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
+            .buttonStyle(.plain)
+
+            if entry.isExpanded {
+                diffContent
+                    .padding(.top, 8)
+                    .clipped()
             }
-            .contentShape(Rectangle())
         }
         .padding(.vertical, 3)
-        .tint(Color.secondary.opacity(0.58))
+    }
+
+    @ViewBuilder
+    private var diffContent: some View {
+        if files.isEmpty {
+            CodeBlockView(text: diffText, language: "diff")
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(files) { file in
+                    ParsedDiffFileView(file: file)
+                }
+            }
+            .clipped()
+        }
     }
 }
 
@@ -1295,6 +1315,7 @@ struct ParsedDiffFileView: View {
                 .padding(.vertical, 6)
             }
             .background(Color(.tertiarySystemBackground).opacity(0.72))
+            .clipped()
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay {
