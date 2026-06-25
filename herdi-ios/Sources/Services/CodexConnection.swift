@@ -24,6 +24,7 @@ final class CodexConnection {
     var transcriptRevision = 0
 
     var isConnected: Bool { connectionState == .connected }
+    var workingStartedAt: Date? { activeTurnStartedAt }
 
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)

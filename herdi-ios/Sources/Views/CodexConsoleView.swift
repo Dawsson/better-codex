@@ -375,7 +375,7 @@ struct CodexThreadDetailView: View {
                     }
 
                     if codex.isWorking {
-                        WorkingTranscriptIndicator()
+                        WorkingTranscriptIndicator(startedAt: codex.workingStartedAt)
                             .id("working-indicator")
                     }
 
@@ -595,6 +595,7 @@ struct ExplorationRunView: View {
 
 struct CommandRunView: View {
     @Bindable var entry: CodexEntry
+    private let previewLimit = 4
 
     var body: some View {
         Group {
@@ -609,32 +610,27 @@ struct CommandRunView: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .tint(.secondary)
     }
 
     private var commandLabel: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("•")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text("Ran")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text(entry.text)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.primary)
-                .lineLimit(entry.isExpanded ? nil : 3)
-                .textSelection(.enabled)
-
-            Spacer(minLength: 0)
-
-            if !entry.title.isEmpty, entry.title != "completed" {
-                Text(entry.title)
-                    .font(.caption2.weight(.medium))
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("Ran")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+
+                ShellCommandText(command: entry.text)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(entry.isExpanded ? nil : 2)
+                    .textSelection(.enabled)
+
+                Spacer(minLength: 0)
+            }
+
+            if !entry.detail.isEmpty, !entry.isExpanded {
+                CommandOutputPreview(text: entry.detail, limit: previewLimit)
             }
         }
         .contentShape(Rectangle())
@@ -642,17 +638,167 @@ struct CommandRunView: View {
 }
 
 struct WorkingTranscriptIndicator: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
+    let startedAt: Date?
 
-            Text("Working")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text(label(at: context.date))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
         .accessibilityLabel("Agent working")
+    }
+
+    private func label(at date: Date) -> String {
+        guard let startedAt else { return "Working" }
+        return "Working (\(Self.durationString(from: startedAt, to: date)))"
+    }
+
+    private static func durationString(from start: Date, to end: Date) -> String {
+        let seconds = max(1, Int(end.timeIntervalSince(start)))
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        if minutes == 0 {
+            return "\(remainingSeconds)s"
+        }
+        return "\(minutes)m \(remainingSeconds)s"
+    }
+}
+
+struct ShellCommandText: View {
+    let command: String
+
+    var body: some View {
+        tokens.indices.reduce(Text("")) { partial, index in
+            let token = tokens[index]
+            let separator = index == tokens.startIndex ? Text("") : Text(" ")
+            return partial + separator + Text(token.text).foregroundColor(token.color)
+        }
+    }
+
+    private var tokens: [ShellCommandToken] {
+        Self.tokenize(command).enumerated().map { index, text in
+            ShellCommandToken(text: text, color: color(for: text, at: index))
+        }
+    }
+
+    private func color(for token: String, at index: Int) -> Color {
+        if index == 0 {
+            return .blue
+        }
+        if token.hasPrefix("-") {
+            return .red
+        }
+        if token.hasPrefix("\"") || token.hasPrefix("'") {
+            return .green
+        }
+        if index == 1 || token.contains("/") || token.hasPrefix(".") {
+            return .cyan
+        }
+        return .primary
+    }
+
+    private static func tokenize(_ command: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+        var isEscaped = false
+
+        for character in command {
+            if isEscaped {
+                current.append(character)
+                isEscaped = false
+                continue
+            }
+
+            if character == "\\" {
+                current.append(character)
+                isEscaped = true
+                continue
+            }
+
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote {
+                    quote = nil
+                }
+                continue
+            }
+
+            if character == "'" || character == "\"" {
+                quote = character
+                current.append(character)
+            } else if character.isWhitespace {
+                if !current.isEmpty {
+                    tokens.append(current)
+                    current = ""
+                }
+            } else {
+                current.append(character)
+            }
+        }
+
+        if !current.isEmpty {
+            tokens.append(current)
+        }
+        return tokens
+    }
+}
+
+struct ShellCommandToken {
+    let text: String
+    let color: Color
+}
+
+struct CommandOutputPreview: View {
+    let text: String
+    let limit: Int
+
+    private var visibleLines: [String] {
+        Array(lines.prefix(limit))
+    }
+
+    private var hiddenCount: Int {
+        max(0, lines.count - visibleLines.count)
+    }
+
+    private var lines: [String] {
+        text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    var body: some View {
+        if !visibleLines.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Text("└")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(0.65))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if hiddenCount > 0 {
+                        Text("… +\(hiddenCount) lines")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary.opacity(0.72))
+                    }
+                }
+            }
+            .padding(.leading, 28)
+            .textSelection(.enabled)
+        }
     }
 }
 
