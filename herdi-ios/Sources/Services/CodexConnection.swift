@@ -32,6 +32,10 @@ final class CodexConnection {
     private var loadingAgentIds: Set<String> = []
     private var loadingAgentsById: [String: CodexThreadSummary] = [:]
     private var freshThreadIds: Set<String> = []
+    private var reconnectAttempt = 0
+    private var reconnectTask: Task<Void, Never>?
+    private var pingTask: Task<Void, Never>?
+    private var shouldAutoReconnect = false
 
     init() {
         let defaults = UserDefaults.standard
@@ -54,7 +58,8 @@ final class CodexConnection {
         }
 
         saveSettings()
-        disconnect(keepState: true)
+        closeSocket()
+        shouldAutoReconnect = true
         lastError = nil
         connectionState = .connecting
 
@@ -66,13 +71,13 @@ final class CodexConnection {
 
         task = session.webSocketTask(with: request)
         task?.resume()
-        receive()
+        receive(on: task)
         initialize()
     }
 
     func disconnect(keepState: Bool = false) {
-        task?.cancel(with: .normalClosure, reason: nil)
-        task = nil
+        shouldAutoReconnect = false
+        closeSocket()
         activeTurnId = nil
         pendingInput = nil
         isWorking = false
@@ -89,6 +94,12 @@ final class CodexConnection {
             activeThreadId = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+        }
+    }
+
+    func reconnectIfNeeded() {
+        if connectionState == .disconnected, !bearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            connect()
         }
     }
 
@@ -195,11 +206,12 @@ final class CodexConnection {
         sendNotification(method: "initialized", params: [:])
     }
 
-    private func receive() {
-        task?.receive { [weak self] result in
+    private func receive(on socket: URLSessionWebSocketTask?) {
+        socket?.receive { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let message):
+                guard self.task === socket else { return }
                 switch message {
                 case .string(let text):
                     self.handle(text)
@@ -208,17 +220,66 @@ final class CodexConnection {
                 @unknown default:
                     break
                 }
-                self.receive()
+                self.receive(on: socket)
             case .failure(let error):
                 DispatchQueue.main.async {
+                    guard self.task === socket else { return }
                     self.lastError = error.localizedDescription
-                    self.connectionState = .disconnected
-                    self.isWorking = false
-                    self.isLoadingThreads = false
-                    self.isLoadingThread = false
+                    self.scheduleReconnect()
                 }
             }
         }
+    }
+
+    private func closeSocket() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        stopPingLoop()
+        task?.cancel(with: .normalClosure, reason: nil)
+        task = nil
+    }
+
+    private func scheduleReconnect() {
+        stopPingLoop()
+        task?.cancel()
+        task = nil
+        isWorking = false
+        isLoadingThreads = false
+        isLoadingThread = false
+        requestKinds.removeAll()
+
+        guard shouldAutoReconnect else {
+            connectionState = .disconnected
+            return
+        }
+
+        reconnectAttempt += 1
+        connectionState = .reconnecting(attempt: reconnectAttempt)
+        let delay = min(Double(1 << min(reconnectAttempt - 1, 5)), 30.0)
+        reconnectTask?.cancel()
+        reconnectTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, self.shouldAutoReconnect else { return }
+            self.reconnectTask = nil
+            self.connect()
+        }
+    }
+
+    private func startPingLoop() {
+        stopPingLoop()
+        pingTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled, self.connectionState == .connected else { continue }
+                let socket = self.task
+                socket?.sendPing { _ in }
+            }
+        }
+    }
+
+    private func stopPingLoop() {
+        pingTask?.cancel()
+        pingTask = nil
     }
 
     private func handle(_ text: String) {
@@ -266,6 +327,8 @@ final class CodexConnection {
 
         switch kind {
         case "initialize":
+            reconnectAttempt = 0
+            startPingLoop()
             connectionState = .connected
             refreshThreads()
 
@@ -578,6 +641,7 @@ final class CodexConnection {
             if let error {
                 DispatchQueue.main.async {
                     self?.lastError = error.localizedDescription
+                    self?.scheduleReconnect()
                 }
             }
         }
