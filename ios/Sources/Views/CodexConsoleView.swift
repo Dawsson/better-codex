@@ -321,6 +321,7 @@ struct CodexThreadDetailView: View {
     let thread: CodexThreadSummary
     @State private var prompt = ""
     @State private var isNearBottom = true
+    @State private var showGitSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -330,20 +331,20 @@ struct CodexThreadDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if codex.isWorking {
-                    ProgressView()
-                } else {
-                    Button {
-                        codex.openThread(thread)
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .accessibilityLabel("Reload agent")
+                Button {
+                    showGitSheet = true
+                } label: {
+                    Image(systemName: "arrow.triangle.branch")
                 }
+                .disabled(!codex.isConnected)
+                .accessibilityLabel("Git actions")
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomInputBar
+        }
+        .sheet(isPresented: $showGitSheet) {
+            GitActionsSheet(thread: thread, codex: codex)
         }
         .onAppear {
             codex.openThread(thread)
@@ -415,7 +416,8 @@ struct CodexThreadDetailView: View {
                 .lineLimit(1...5)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 21))
+                .frame(minHeight: 44)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
                 .disabled(!codex.isConnected)
 
             Button {
@@ -426,7 +428,7 @@ struct CodexThreadDetailView: View {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 44, height: 44)
                     .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
             }
             .disabled(!canSend)
@@ -473,6 +475,138 @@ struct InputAccessorySurface: View {
     }
 }
 
+struct GitActionsSheet: View {
+    let thread: CodexThreadSummary
+    let codex: CodexConnection
+    @Environment(\.dismiss) private var dismiss
+    @State private var commitMessage = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Repository") {
+                    infoRow("Folder", thread.projectName)
+                    infoRow("Path", thread.cwd)
+                    if let branch = thread.branch, !branch.isEmpty {
+                        infoRow("Branch", branch)
+                    }
+                    if let commitsToPush = thread.commitsToPush {
+                        infoRow("To push", "\(commitsToPush)")
+                    }
+                }
+
+                Section {
+                    Button {
+                        send(gitInspectPrompt)
+                    } label: {
+                        Label("Inspect Changes", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    Button {
+                        send(commitMessagePrompt)
+                    } label: {
+                        Label("Generate Commit Message", systemImage: "text.badge.checkmark")
+                    }
+                } footer: {
+                    Text("These actions ask the open Codex agent to run git in this workspace.")
+                }
+
+                Section("Commit") {
+                    TextField("Commit message", text: $commitMessage, axis: .vertical)
+                        .lineLimit(1...3)
+                        .textInputAutocapitalization(.sentences)
+
+                    Button {
+                        send(commitPrompt)
+                    } label: {
+                        Label("Commit Changes", systemImage: "checkmark.seal")
+                    }
+                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Section {
+                    Button {
+                        send(pushPrompt)
+                    } label: {
+                        Label("Push Branch", systemImage: "arrow.up.circle")
+                    }
+
+                    Button {
+                        send(commitAndPushPrompt)
+                    } label: {
+                        Label("Commit and Push", systemImage: "paperplane")
+                    }
+                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .navigationTitle("Git")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func infoRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 18)
+            Text(value)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func send(_ prompt: String) {
+        codex.sendPrompt(prompt)
+        dismiss()
+    }
+
+    private var gitInspectPrompt: String {
+        """
+        Inspect the git state for this workspace. Run focused git commands like `git status --short --branch`, summarize changed files, untracked files, branch/ahead state, and whether it is ready to commit or push. Do not commit or push yet.
+        """
+    }
+
+    private var commitMessagePrompt: String {
+        """
+        Inspect the current git diff and propose one concise commit message. Do not commit yet. Return the message plainly first, then a short note about why it fits.
+        """
+    }
+
+    private var commitPrompt: String {
+        let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        return """
+        Commit the current intended changes with this commit message:
+        \(message)
+
+        Use the repo's normal commit workflow. Review `git status --short --branch` first, include only relevant changed files, and do not push.
+        """
+    }
+
+    private var pushPrompt: String {
+        """
+        Check the current branch and push it to its upstream. If there is no upstream, explain the safest push command before running it.
+        """
+    }
+
+    private var commitAndPushPrompt: String {
+        let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        return """
+        Review the current git state, commit the intended changes with this commit message, then push the branch:
+        \(message)
+
+        Use the repo's normal commit workflow and avoid unrelated files.
+        """
+    }
+}
+
 struct PendingInputBar: View {
     let pending: PendingCodexInput
     @Bindable var codex: CodexConnection
@@ -487,7 +621,8 @@ struct PendingInputBar: View {
                 TextField("Response", text: $codex.inputAnswer)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 21))
+                    .frame(minHeight: 44)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
 
                 Button {
                     codex.answerPendingInput(codex.inputAnswer)
@@ -495,7 +630,7 @@ struct PendingInputBar: View {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
                         .background(canSend ? Color.blue : Color.secondary.opacity(0.35), in: Circle())
                 }
                 .disabled(!canSend)
