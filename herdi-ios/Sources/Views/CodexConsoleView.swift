@@ -325,7 +325,6 @@ struct CodexThreadDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
-            composer
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -343,13 +342,20 @@ struct CodexThreadDetailView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            if let pending = codex.pendingInput {
-                PendingInputBar(pending: pending, codex: codex)
-            }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomInputBar
         }
         .onAppear {
             codex.openThread(thread)
+        }
+    }
+
+    @ViewBuilder
+    private var bottomInputBar: some View {
+        if let pending = codex.pendingInput {
+            PendingInputBar(pending: pending, codex: codex)
+        } else {
+            composer
         }
     }
 
@@ -428,7 +434,7 @@ struct CodexThreadDetailView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(.regularMaterial)
+        .background { InputAccessorySurface() }
     }
 
     private var canSend: Bool {
@@ -444,6 +450,26 @@ struct CodexThreadDetailView: View {
         } else {
             action()
         }
+    }
+}
+
+struct InputAccessorySurface: View {
+    var body: some View {
+        Color(.systemBackground)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(height: 1)
+            }
+            .clipShape(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 20,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 20,
+                    style: .continuous
+                )
+            )
     }
 }
 
@@ -478,7 +504,7 @@ struct PendingInputBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(.regularMaterial)
+        .background { InputAccessorySurface() }
     }
 
     private var canSend: Bool {
@@ -956,18 +982,72 @@ struct InlineMarkdownText: View {
     }
 
     private var composed: Text {
-        let parts = text.split(separator: "`", omittingEmptySubsequences: false).map(String.init)
-        return parts.indices.reduce(Text("")) { partial, index in
-            let part = parts[index]
-            guard !part.isEmpty else { return partial }
-            if index.isMultiple(of: 2) {
-                return partial + Text(part)
+        inlineSegments.reduce(Text("")) { partial, segment in
+            switch segment {
+            case .plain(let value):
+                partial + Text(value)
+            case .bold(let value):
+                partial + Text(value).bold()
+            case .code(let value):
+                partial + Text(value)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.cyan)
             }
-            return partial + Text(part)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.cyan)
         }
     }
+
+    private var inlineSegments: [InlineMarkdownSegment] {
+        var segments: [InlineMarkdownSegment] = []
+        var remaining = text[...]
+
+        while !remaining.isEmpty {
+            let nextCode = remaining.firstIndex(of: "`")
+            let nextBold = remaining.range(of: "**")?.lowerBound
+
+            if let nextCode, nextBold.map({ nextCode < $0 }) ?? true {
+                appendPlain(String(remaining[..<nextCode]), to: &segments)
+                let afterMarker = remaining.index(after: nextCode)
+                if let close = remaining[afterMarker...].firstIndex(of: "`") {
+                    segments.append(.code(String(remaining[afterMarker..<close])))
+                    remaining = remaining[remaining.index(after: close)...]
+                } else {
+                    segments.append(.plain(String(remaining[nextCode...])))
+                    break
+                }
+            } else if let nextBold {
+                appendPlain(String(remaining[..<nextBold]), to: &segments)
+                let afterMarker = remaining.index(nextBold, offsetBy: 2)
+                if let closeRange = remaining[afterMarker...].range(of: "**") {
+                    let value = String(remaining[afterMarker..<closeRange.lowerBound])
+                    if value.isEmpty {
+                        segments.append(.plain("****"))
+                    } else {
+                        segments.append(.bold(value))
+                    }
+                    remaining = remaining[closeRange.upperBound...]
+                } else {
+                    segments.append(.plain(String(remaining[nextBold...])))
+                    break
+                }
+            } else {
+                appendPlain(String(remaining), to: &segments)
+                break
+            }
+        }
+
+        return segments
+    }
+
+    private func appendPlain(_ value: String, to segments: inout [InlineMarkdownSegment]) {
+        guard !value.isEmpty else { return }
+        segments.append(.plain(value))
+    }
+}
+
+enum InlineMarkdownSegment {
+    case plain(String)
+    case bold(String)
+    case code(String)
 }
 
 struct CodeBlockView: View {
