@@ -448,7 +448,7 @@ struct CodexThreadDetailView: View {
     @State private var selectedImages: [CodexImageAttachment] = []
     @State private var isProcessingImages = false
     @State private var imageError: String?
-    @State private var isNearBottom = true
+    @State private var isNearBottom = false
     @State private var showFileBrowser = false
     @State private var codeReferences: [CodeReferenceSnippet] = []
 
@@ -535,9 +535,6 @@ struct CodexThreadDetailView: View {
             .onChange(of: codex.isWorking) { _, _ in
                 guard isNearBottom else { return }
                 scrollToBottom(proxy, animated: true)
-            }
-            .onAppear {
-                scrollToBottom(proxy, animated: false)
             }
         }
     }

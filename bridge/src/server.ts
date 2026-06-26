@@ -238,13 +238,15 @@ function handleBridgeResumeResponse(pending: PendingUpstreamRequest, message: Rp
   }
   const result = isObject(message.result) ? message.result : {};
   const thread = isObject(result.thread) ? result.thread : {};
-  const entries = transcriptEntriesForThread(thread);
+  const transcript = transcriptEntriesForThread(thread);
   send(client.socket, {
     id: pending.clientRequestId,
     result: {
       ...result,
       bridgeTranscript: {
-        entries,
+        entries: transcript.entries,
+        totalEntries: transcript.totalEntries,
+        omittedEntries: transcript.omittedEntries,
         source: stringValue(thread.path) ?? "",
       },
     },
@@ -420,9 +422,9 @@ function handleClientMessage(client: ClientConnection, message: RpcMessage) {
   }
 }
 
-function transcriptEntriesForThread(thread: JsonObject): TranscriptEntry[] {
+function transcriptEntriesForThread(thread: JsonObject): { entries: TranscriptEntry[]; totalEntries: number; omittedEntries: number } {
   const path = stringValue(thread.path);
-  if (!path || !existsSync(path)) return [];
+  if (!path || !existsSync(path)) return { entries: [], totalEntries: 0, omittedEntries: 0 };
 
   const entries: TranscriptEntry[] = [];
   const entriesById = new Map<string, TranscriptEntry>();
@@ -434,7 +436,12 @@ function transcriptEntriesForThread(thread: JsonObject): TranscriptEntry[] {
     if (!record || record.type !== "response_item" || !isObject(record.payload)) continue;
     appendResponseItem(entries, entriesById, record.payload, lineNumber);
   }
-  return compactTranscriptEntries(entries);
+  const compacted = compactTranscriptEntries(entries);
+  return {
+    entries: compacted,
+    totalEntries: entries.length,
+    omittedEntries: Math.max(0, entries.length - compacted.length),
+  };
 }
 
 function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string, TranscriptEntry>, item: JsonObject, lineNumber: number) {

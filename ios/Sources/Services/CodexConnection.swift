@@ -1046,6 +1046,22 @@ final class CodexConnection {
         resetExplorationState()
         transcriptRevision += 1
 
+        let totalEntries = Self.intValue(transcript["totalEntries"])
+        let omittedEntries = Self.intValue(transcript["omittedEntries"]) ?? 0
+        if let totalEntries, totalEntries > rawEntries.count {
+            append(
+                .status,
+                title: "Loaded transcript",
+                text: "Showing \(rawEntries.count.formatted()) of \(totalEntries.formatted()) items. \(omittedEntries.formatted()) older items are compacted."
+            )
+        } else if !rawEntries.isEmpty {
+            append(
+                .status,
+                title: "Loaded transcript",
+                text: "Showing \(rawEntries.count.formatted()) items."
+            )
+        }
+
         for rawEntry in rawEntries {
             guard let id = rawEntry["id"] as? String,
                   let rawKind = rawEntry["kind"] as? String,
