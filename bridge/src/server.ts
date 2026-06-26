@@ -217,6 +217,18 @@ function handleBridgeResumeResponse(pending: PendingUpstreamRequest, message: Rp
   const client = pending.client;
   if (!client) return;
   if (message.error) {
+    if (isMissingRolloutError(message.error)) {
+      const threadId = pending.bridgeResume?.threadId;
+      if (threadId) {
+        upsertSubscription.run({
+          $threadId: threadId,
+          $cwd: subscribedThreads.get(threadId) ?? "",
+          $status: "inactive",
+          $updatedAtMs: now(),
+        });
+        subscribedThreads.delete(threadId);
+      }
+    }
     send(client.socket, { ...message, id: pending.clientRequestId });
     return;
   }
@@ -303,11 +315,17 @@ function storeNotification(method: string, params: JsonObject) {
     $paramsJson: JSON.stringify(params),
     $createdAtMs: now(),
   });
-  if (method === "turn/completed") {
+  if (
+    method === "turn/completed"
+    || method === "thread/deleted"
+    || method === "thread/archived"
+    || method === "thread/closed"
+    || isNotLoadedStatus(method, params)
+  ) {
     upsertSubscription.run({
       $threadId: threadId,
       $cwd: subscribedThreads.get(threadId) ?? "",
-      $status: "idle",
+      $status: method === "turn/completed" ? "idle" : "inactive",
       $updatedAtMs: now(),
     });
     subscribedThreads.delete(threadId);
@@ -566,6 +584,12 @@ function statusType(value: unknown): string {
   return "unknown";
 }
 
+function isMissingRolloutError(error: unknown) {
+  if (!isObject(error)) return false;
+  const message = stringValue(error.message) ?? "";
+  return message.includes("no rollout found") || message.includes("not materialized yet");
+}
+
 function notificationThreadId(params: JsonObject) {
   return stringValue(params.threadId)
     ?? (isObject(params.thread) ? stringValue(params.thread.id) : undefined)
@@ -582,6 +606,11 @@ function notificationTurnId(params: JsonObject) {
 function clientShouldReceive(client: ClientConnection, params: JsonObject) {
   const threadId = notificationThreadId(params);
   return !threadId || client.threadIds.has(threadId);
+}
+
+function isNotLoadedStatus(method: string, params: JsonObject) {
+  if (method !== "thread/status/changed") return false;
+  return statusType(params.status) === "notLoaded";
 }
 
 setInterval(() => {

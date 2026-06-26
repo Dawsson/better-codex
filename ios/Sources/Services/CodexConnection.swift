@@ -1147,6 +1147,12 @@ final class CodexConnection {
             return false
         }
 
+        if kind?.hasPrefix("thread/resume:") == true || kind?.hasPrefix("thread/read:") == true {
+            removeUnavailableThread(threadId)
+            lastError = nil
+            return true
+        }
+
         if kind?.hasPrefix("thread/read:list:") == true {
             finishLoadingAgent(threadId)
             return true
@@ -1162,6 +1168,27 @@ final class CodexConnection {
         selectFreshThread(thread)
         lastError = nil
         return true
+    }
+
+    private func removeUnavailableThread(_ threadId: String) {
+        hiddenThreadIds.insert(threadId)
+        threads.removeAll { $0.id == threadId }
+        freshThreadIds.remove(threadId)
+        saveHiddenThreadIds()
+        saveCachedThreads()
+        if activeThreadId == threadId || selectedThread?.id == threadId {
+            selectedThread = nil
+            activeThreadId = nil
+            activeThreadTranscriptPath = nil
+            entries.removeAll()
+            entriesByItemId.removeAll()
+            pendingOptimisticUserEntries.removeAll()
+            resetExplorationState()
+            transcriptRevision += 1
+            isLoadingThread = false
+            pendingInput = nil
+        }
+        diagnosticsStatus = "Removed unavailable thread"
     }
 
     private func threadId(from kind: String?) -> String? {
