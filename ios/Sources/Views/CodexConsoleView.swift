@@ -33,6 +33,8 @@ struct CodexThreadListView: View {
     @State private var renamingThread: CodexThreadSummary?
     @State private var renameText = ""
     @State private var showRenameAlert = false
+    @State private var fileBrowserThread: CodexThreadSummary?
+    @State private var homeCodeReferences: [CodeReferenceSnippet] = []
 
     var body: some View {
         List {
@@ -65,6 +67,25 @@ struct CodexThreadListView: View {
                     }
                     .listRowBackground(Color.clear)
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .contextMenu {
+                        Button {
+                            fileBrowserThread = thread
+                        } label: {
+                            Label("Open Files", systemImage: "folder")
+                        }
+
+                        Button {
+                            beginRename(thread)
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            codex.deleteThread(thread)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
                             codex.deleteThread(thread)
@@ -73,9 +94,7 @@ struct CodexThreadListView: View {
                         }
 
                         Button {
-                            renamingThread = thread
-                            renameText = thread.title
-                            showRenameAlert = true
+                            beginRename(thread)
                         } label: {
                             Label("Rename", systemImage: "pencil")
                         }
@@ -137,6 +156,19 @@ struct CodexThreadListView: View {
             }
             .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+        .sheet(item: $fileBrowserThread) { thread in
+            FileBrowserSheet(
+                rootPath: thread.cwd.isEmpty ? codex.cwd : thread.cwd,
+                references: $homeCodeReferences
+            )
+            .environment(codex)
+        }
+    }
+
+    private func beginRename(_ thread: CodexThreadSummary) {
+        renamingThread = thread
+        renameText = thread.title
+        showRenameAlert = true
     }
 
     private var connectionRow: some View {
@@ -801,7 +833,7 @@ struct RemoteDirectoryView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
             } else {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 4) {
                     ForEach(visibleRows) { row in
                         if row.entry.isDirectory {
                             Button {
@@ -902,14 +934,14 @@ struct RemoteFileRow: View {
             if isLoading {
                 ProgressView()
                     .controlSize(.mini)
-                    .frame(width: 15)
+                    .frame(width: 18)
             } else {
                 FileIcon(path: entry.path, isDirectory: entry.isDirectory, isExpanded: isExpanded)
-                    .frame(width: 15)
+                    .frame(width: 18)
             }
 
             Text(entry.name)
-                .font(.caption.weight(entry.isDirectory ? .medium : .regular))
+                .font(.subheadline.weight(entry.isDirectory ? .medium : .regular))
                 .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                 .lineLimit(1)
 
@@ -1007,15 +1039,15 @@ struct FileIcon: View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(metadata.background)
-                .frame(width: 15, height: 14)
+                .frame(width: 18, height: 17)
             if let label = metadata.label {
                 Text(label)
-                    .font(.system(size: label.count > 2 ? 5 : 6, weight: .bold, design: .rounded))
+                    .font(.system(size: label.count > 2 ? 6 : 7, weight: .bold, design: .rounded))
                     .foregroundStyle(metadata.foreground)
                     .minimumScaleFactor(0.7)
             } else if let symbol = metadata.symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: isDirectory ? 11 : 9, weight: .semibold))
+                    .font(.system(size: isDirectory ? 13 : 11, weight: .semibold))
                     .foregroundStyle(metadata.foreground)
             }
         }
