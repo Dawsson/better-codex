@@ -48,10 +48,10 @@ const upstreamToken =
 const bridgeToken = env.BETTER_CODEX_BRIDGE_TOKEN ?? upstreamToken;
 const ttlMs = Number(env.BETTER_CODEX_BRIDGE_TTL_MS ?? 6 * 60 * 60 * 1000);
 const dbPath = env.BETTER_CODEX_BRIDGE_DB ?? `${env.HOME}/.better-codex/bridge.sqlite`;
-const transcriptHeadEntries = Number(env.BETTER_CODEX_TRANSCRIPT_HEAD_ENTRIES ?? 80);
-const transcriptTailEntries = Number(env.BETTER_CODEX_TRANSCRIPT_TAIL_ENTRIES ?? 2200);
-const transcriptMaxTextChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_TEXT_CHARS ?? 20_000);
-const transcriptMaxDetailChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_DETAIL_CHARS ?? 16_000);
+const transcriptHeadEntries = Number(env.BETTER_CODEX_TRANSCRIPT_HEAD_ENTRIES ?? 40);
+const transcriptTailEntries = Number(env.BETTER_CODEX_TRANSCRIPT_TAIL_ENTRIES ?? 420);
+const transcriptMaxTextChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_TEXT_CHARS ?? 8_000);
+const transcriptMaxDetailChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_DETAIL_CHARS ?? 2_500);
 
 if (!upstreamToken) {
   throw new Error("Missing CODEX_APP_SERVER_TOKEN or CODEX_APP_SERVER_TOKEN_FILE");
