@@ -99,6 +99,7 @@ final class CodexConnection {
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
     private var shouldAutoReconnect = false
+    private var subscribedThreadId: String?
 
     init() {
         let defaults = UserDefaults.standard
@@ -289,6 +290,7 @@ final class CodexConnection {
             return
         }
 
+        unsubscribeFromActiveThreadIfNeeded(except: thread.id)
         selectedThread = thread
         activeThreadId = thread.id
         entries.removeAll()
@@ -487,6 +489,18 @@ final class CodexConnection {
             params: ["threadId": threadId],
             kind: "thread/turns/list:\(threadId)"
         )
+    }
+
+    private func unsubscribeFromActiveThreadIfNeeded(except threadId: String? = nil) {
+        guard isConnected,
+              let subscribedThreadId,
+              subscribedThreadId != threadId else { return }
+        sendRequest(
+            method: "thread/unsubscribe",
+            params: ["threadId": subscribedThreadId],
+            kind: "thread/unsubscribe:\(subscribedThreadId)"
+        )
+        self.subscribedThreadId = nil
     }
 
     private func receive(on socket: URLSessionWebSocketTask?) {
@@ -705,13 +719,21 @@ final class CodexConnection {
                     ?? []
                 Self.logger.info("Loaded turns count=\(turns.count, privacy: .public) kind=\(kind ?? "unknown", privacy: .public)")
                 diagnosticsStatus = "Loaded \(turns.count) turns: \(Self.shortTimeString())"
-                loadHistoryFromTurns(turns)
+                let selectedIsActive = selectedThread?.status == "active"
+                    || selectedThread?.status == "running"
+                    || selectedThread?.status == "in_progress"
+                loadHistoryFromTurns(
+                    turns,
+                    reset: entries.isEmpty,
+                    showEmptyState: !selectedIsActive
+                )
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/resume:") == true,
                       let thread = result["thread"] as? [String: Any],
                       let summary = CodexThreadSummary(json: thread) {
                 selectedThread = summary
                 activeThreadId = summary.id
+                subscribedThreadId = summary.id
                 refreshThread(summary.id)
             }
         }
@@ -761,10 +783,10 @@ final class CodexConnection {
             refreshThreads()
 
         case "turn/started":
+            guard belongsToActiveThread(params) else { return }
             isWorking = true
             activeTurnStartedAt = Date()
             if let threadId = params["threadId"] as? String {
-                activeThreadId = threadId
                 updateThreadStatus(threadId, status: "active")
             }
             if let turn = params["turn"] as? [String: Any], let id = turn["id"] as? String {
@@ -773,6 +795,7 @@ final class CodexConnection {
             append(.status, title: "Turn started", text: "")
 
         case "turn/completed":
+            guard belongsToActiveThread(params) else { return }
             isWorking = false
             activeTurnId = nil
             endActiveExplorationGroup()
@@ -782,6 +805,16 @@ final class CodexConnection {
             activeTurnStartedAt = nil
             refreshThreads()
             startNextQueuedTurnIfNeeded()
+
+        case "turn/diff/updated":
+            guard belongsToActiveThread(params),
+                  let turnId = params["turnId"] as? String,
+                  let diff = params["diff"] as? String,
+                  !diff.isEmpty else { return }
+            let itemId = "diff-\(turnId)"
+            let entry = entriesByItemId[itemId] ?? append(.diff, title: "Changes", text: "Live diff updated", itemId: itemId)
+            entry.detail = diff
+            transcriptRevision += 1
 
         case "item/started":
             if belongsToActiveThread(params), let item = params["item"] as? [String: Any] {
