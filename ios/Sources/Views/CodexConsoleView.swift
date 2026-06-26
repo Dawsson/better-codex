@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+import Highlighter
 
 struct CodexConsoleView: View {
     @Environment(CodexConnection.self) private var codex
@@ -868,34 +869,31 @@ struct RemoteFileRow: View {
     var isLoading = false
 
     var body: some View {
-        HStack(spacing: 11) {
-            Color.clear
-                .frame(width: CGFloat(depth) * 16)
+        HStack(spacing: 7) {
+            TreeIndentGuides(depth: depth)
 
             if entry.isDirectory {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 12)
+                    .frame(width: 10)
             } else {
                 Color.clear
-                    .frame(width: 12)
+                    .frame(width: 10)
             }
 
             if isLoading {
                 ProgressView()
                     .controlSize(.mini)
-                    .frame(width: 22)
+                    .frame(width: 18)
             } else {
-                Image(systemName: entry.iconName)
-                    .font(.body)
-                    .foregroundStyle(entry.isDirectory ? .blue : .secondary)
-                    .frame(width: 22)
+                FileIcon(path: entry.path, isDirectory: entry.isDirectory, isExpanded: isExpanded)
+                    .frame(width: 18)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
-                    .font(.subheadline)
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                 Text(entry.path.relativePath(from: rootPath))
                     .font(.caption2)
@@ -912,11 +910,81 @@ struct RemoteFileRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .padding(.vertical, 2)
     }
 
     private func byteCount(_ value: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+}
+
+struct TreeIndentGuides: View {
+    let depth: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<depth, id: \.self) { _ in
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.22))
+                    .frame(width: 1)
+                    .frame(width: 14, alignment: .center)
+            }
+        }
+        .frame(width: CGFloat(depth) * 14)
+    }
+}
+
+struct FileIcon: View {
+    let path: String
+    let isDirectory: Bool
+    let isExpanded: Bool
+
+    private var symbol: String {
+        if isDirectory { return isExpanded ? "folder.fill" : "folder" }
+        let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        if ["package.json", "bun.lock", "pnpm-lock.yaml", "yarn.lock"].contains(name) { return "shippingbox.fill" }
+        if ["env", "env.local", "env.dev", "env.production"].contains(ext) || name.hasPrefix(".env") { return "key.fill" }
+        switch ext {
+        case "swift": return "swift"
+        case "ts", "tsx", "js", "jsx", "mjs", "cjs": return "curlybraces.square.fill"
+        case "json", "jsonc": return "braces"
+        case "md", "mdx", "markdown": return "doc.richtext.fill"
+        case "yml", "yaml", "toml": return "slider.horizontal.3"
+        case "css", "scss", "sass": return "paintpalette.fill"
+        case "html", "htm": return "chevron.left.forwardslash.chevron.right"
+        case "png", "jpg", "jpeg", "gif", "webp", "svg": return "photo.fill"
+        case "sql": return "cylinder.split.1x2.fill"
+        case "sh", "bash", "zsh": return "terminal.fill"
+        case "lock": return "lock.doc.fill"
+        default: return "doc.text"
+        }
+    }
+
+    private var color: Color {
+        if isDirectory { return .blue }
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "swift": return .orange
+        case "ts", "tsx": return .blue
+        case "js", "jsx", "mjs", "cjs": return .yellow
+        case "json", "jsonc": return .green
+        case "md", "mdx", "markdown": return .mint
+        case "yml", "yaml", "toml": return .purple
+        case "css", "scss", "sass": return .pink
+        case "html", "htm": return .red
+        case "png", "jpg", "jpeg", "gif", "webp", "svg": return .teal
+        case "sql": return .indigo
+        case "sh", "bash", "zsh": return .secondary
+        default: return .secondary
+        }
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.caption)
+            .foregroundStyle(color)
     }
 }
 
@@ -1115,8 +1183,18 @@ enum CodeSelectionMapper {
 }
 
 enum CodeAttributedStringBuilder {
+    private static let highlighter: Highlighter? = {
+        guard let highlighter = Highlighter() else { return nil }
+        highlighter.setTheme("atom-one-dark", withFont: "Menlo-Regular", ofSize: 13)
+        return highlighter
+    }()
+
     static func attributed(_ code: String, language: String) -> NSAttributedString {
         let baseFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        if let highlighted = highlightedWithLibrary(code, language: language, font: baseFont) {
+            return highlighted
+        }
+
         let result = NSMutableAttributedString(
             string: code,
             attributes: [
@@ -1131,6 +1209,23 @@ enum CodeAttributedStringBuilder {
         color(pattern: #""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'"#, in: code, range: fullRange, color: .systemGreen, result: result)
         color(pattern: #"\b\d+(?:\.\d+)?\b"#, in: code, range: fullRange, color: .systemOrange, result: result)
         color(pattern: keywordPattern(for: language), in: code, range: fullRange, color: .systemBlue, result: result)
+        return result
+    }
+
+    private static func highlightedWithLibrary(
+        _ code: String,
+        language: String,
+        font: UIFont
+    ) -> NSAttributedString? {
+        guard let highlighter else { return nil }
+        guard let highlighted = highlighter.highlight(code, as: language.isEmpty ? nil : language) else {
+            return nil
+        }
+        let result = NSMutableAttributedString(attributedString: highlighted)
+        result.addAttribute(.font, value: font, range: NSRange(location: 0, length: result.length))
+        if result.length > 0 {
+            result.addAttribute(.backgroundColor, value: UIColor.systemBackground, range: NSRange(location: 0, length: result.length))
+        }
         return result
     }
 
@@ -1190,13 +1285,13 @@ func languageForPath(_ path: String) -> String {
     case "swift":
         return "swift"
     case "js", "mjs", "cjs":
-        return "js"
+        return "javascript"
     case "jsx":
         return "jsx"
     case "ts":
-        return "ts"
+        return "typescript"
     case "tsx":
-        return "tsx"
+        return "typescript"
     case "json":
         return "json"
     case "md", "markdown":
