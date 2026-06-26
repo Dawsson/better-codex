@@ -811,7 +811,7 @@ struct RemoteDirectoryView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                     } else {
                         Button {
@@ -825,7 +825,7 @@ struct RemoteDirectoryView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                     }
                 }
@@ -893,7 +893,7 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             TreeIndentGuides(depth: depth)
 
             if isLoading {
@@ -919,7 +919,7 @@ struct RemoteFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 0)
         .padding(.vertical, 0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
