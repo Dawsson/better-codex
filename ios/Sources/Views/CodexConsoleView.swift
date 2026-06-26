@@ -893,18 +893,8 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 2) {
             TreeIndentGuides(depth: depth)
-
-            if entry.isDirectory {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 6)
-            } else {
-                Color.clear
-                    .frame(width: 6)
-            }
 
             if isLoading {
                 ProgressView()
@@ -929,7 +919,7 @@ struct RemoteFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .padding(.horizontal, 3)
+        .padding(.horizontal, 6)
         .padding(.vertical, 0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
