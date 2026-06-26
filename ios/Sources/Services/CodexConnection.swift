@@ -927,13 +927,12 @@ final class CodexConnection {
             guard belongsToActiveThread(params),
                   let itemId = params["itemId"] as? String,
                   let delta = params["delta"] as? String else { return }
-            if explorationItemIds.contains(itemId) {
-                return
-            }
-            let entry = entriesByItemId["output-\(itemId)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(itemId)")
-            if let commandEntry = entriesByItemId[itemId], commandEntry.kind == .command {
+            if explorationItemIds.contains(itemId), let explorationEntry = activeExplorationEntry {
+                explorationEntry.detail += delta
+            } else if let commandEntry = entriesByItemId[itemId], commandEntry.kind == .command {
                 commandEntry.detail += delta
             } else {
+                let entry = entriesByItemId["output-\(itemId)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(itemId)")
                 entry.text += delta
             }
             transcriptRevision += 1
@@ -1107,6 +1106,9 @@ final class CodexConnection {
             let command = item["command"] as? String ?? ""
             if let explorationLabel = Self.explorationLabel(for: command) {
                 upsertExplorationItem(id: id, label: explorationLabel)
+                if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
+                    activeExplorationEntry?.detail = output
+                }
                 transcriptRevision += 1
                 return
             }
@@ -1731,8 +1733,8 @@ final class CodexConnection {
         guard let attempt = pendingTranscriptBackfills.removeValue(forKey: id) else { return false }
         guard activeThreadId == attempt.threadId else { return true }
 
-        let document = remoteFileDocument(from: result, path: attempt.path)
-        let applied = backfillTranscript(from: document.text, turnId: attempt.turnId)
+        let jsonl = remoteText(from: result, maxCharacters: 2_000_000, keepTail: true)
+        let applied = backfillTranscript(from: jsonl, turnId: attempt.turnId)
         diagnosticsStatus = applied > 0
             ? "Backfilled \(applied) active items"
             : "No active backfill items"
@@ -1915,29 +1917,36 @@ final class CodexConnection {
 
     private func remoteFileDocument(from result: Any, path: String) -> RemoteFileDocument {
         let maxCharacters = 240_000
+        let rawText = remoteText(from: result, maxCharacters: maxCharacters, keepTail: false)
+        let isTruncated = decodedRemoteText(from: result).count > maxCharacters
+        return RemoteFileDocument(path: path, text: rawText, isTruncated: isTruncated)
+    }
+
+    private func remoteText(from result: Any, maxCharacters: Int, keepTail: Bool) -> String {
+        let rawText = decodedRemoteText(from: result)
+        guard rawText.count > maxCharacters else { return rawText }
+        return keepTail ? String(rawText.suffix(maxCharacters)) : String(rawText.prefix(maxCharacters))
+    }
+
+    private func decodedRemoteText(from result: Any) -> String {
         let resultDict = result as? [String: Any]
-        let rawText: String
         if let text = result as? String {
-            rawText = text
+            return text
         } else if let dataBase64 = resultDict?["dataBase64"] as? String,
            let data = Data(base64Encoded: dataBase64),
            let decoded = String(data: data, encoding: .utf8) {
-            rawText = decoded
+            return decoded
         } else if let dataBase64 = resultDict?["base64"] as? String,
                   let data = Data(base64Encoded: dataBase64),
                   let decoded = String(data: data, encoding: .utf8) {
-            rawText = decoded
+            return decoded
         } else {
-            rawText =
-                resultDict?["text"] as? String
+            return resultDict?["text"] as? String
                 ?? resultDict?["content"] as? String
                 ?? resultDict?["data"] as? String
                 ?? resultDict?["contents"] as? String
                 ?? ""
         }
-        let isTruncated = rawText.count > maxCharacters
-        let text = isTruncated ? String(rawText.prefix(maxCharacters)) : rawText
-        return RemoteFileDocument(path: path, text: text, isTruncated: isTruncated)
     }
 
     private func normalizedFilePath(_ path: String) -> String {
