@@ -48,6 +48,10 @@ const upstreamToken =
 const bridgeToken = env.BETTER_CODEX_BRIDGE_TOKEN ?? upstreamToken;
 const ttlMs = Number(env.BETTER_CODEX_BRIDGE_TTL_MS ?? 6 * 60 * 60 * 1000);
 const dbPath = env.BETTER_CODEX_BRIDGE_DB ?? `${env.HOME}/.better-codex/bridge.sqlite`;
+const transcriptHeadEntries = Number(env.BETTER_CODEX_TRANSCRIPT_HEAD_ENTRIES ?? 80);
+const transcriptTailEntries = Number(env.BETTER_CODEX_TRANSCRIPT_TAIL_ENTRIES ?? 2200);
+const transcriptMaxTextChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_TEXT_CHARS ?? 20_000);
+const transcriptMaxDetailChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_DETAIL_CHARS ?? 16_000);
 
 if (!upstreamToken) {
   throw new Error("Missing CODEX_APP_SERVER_TOKEN or CODEX_APP_SERVER_TOKEN_FILE");
@@ -430,7 +434,7 @@ function transcriptEntriesForThread(thread: JsonObject): TranscriptEntry[] {
     if (!record || record.type !== "response_item" || !isObject(record.payload)) continue;
     appendResponseItem(entries, entriesById, record.payload, lineNumber);
   }
-  return entries;
+  return compactTranscriptEntries(entries);
 }
 
 function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string, TranscriptEntry>, item: JsonObject, lineNumber: number) {
@@ -473,7 +477,7 @@ function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string,
     const existing = entriesById.get(callId);
     if (existing) {
       existing.title = "completed";
-      existing.detail = output;
+      existing.detail = truncateField(output, transcriptMaxDetailChars);
     } else {
       upsertEntry(entries, entriesById, `output-${callId}`, {
         id: `output-${callId}`,
@@ -505,7 +509,7 @@ function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string,
     if (!callId) return;
     const existing = entriesById.get(callId);
     const output = stringValue(item.output) ?? "";
-    if (existing && output) existing.detail = output;
+    if (existing && output) existing.detail = truncateField(output, transcriptMaxDetailChars);
     return;
   }
 
@@ -526,6 +530,10 @@ function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string,
 }
 
 function upsertEntry(entries: TranscriptEntry[], entriesById: Map<string, TranscriptEntry>, id: string, next: TranscriptEntry) {
+  next.text = truncateField(next.text, transcriptMaxTextChars);
+  if (next.detail) {
+    next.detail = truncateField(next.detail, transcriptMaxDetailChars);
+  }
   const existing = entriesById.get(id);
   if (existing) {
     Object.assign(existing, next);
@@ -534,6 +542,30 @@ function upsertEntry(entries: TranscriptEntry[], entriesById: Map<string, Transc
   entriesById.set(id, next);
   entries.push(next);
   return next;
+}
+
+function compactTranscriptEntries(entries: TranscriptEntry[]) {
+  const maxEntries = transcriptHeadEntries + transcriptTailEntries;
+  if (entries.length <= maxEntries) return entries;
+
+  const head = entries.slice(0, transcriptHeadEntries);
+  const tail = entries.slice(-transcriptTailEntries);
+  const omitted = entries.length - head.length - tail.length;
+  return [
+    ...head,
+    {
+      id: `bridge-omitted-${omitted}`,
+      kind: "status",
+      title: "Transcript compacted",
+      text: `Skipped ${omitted.toLocaleString()} older items. Showing the beginning and the latest activity.`,
+    } satisfies TranscriptEntry,
+    ...tail,
+  ];
+}
+
+function truncateField(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} characters by Better Codex bridge]`;
 }
 
 function responseContentText(content: unknown[]) {
