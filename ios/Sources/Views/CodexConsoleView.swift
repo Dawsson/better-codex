@@ -35,6 +35,7 @@ struct CodexThreadListView: View {
     @State private var showRenameAlert = false
     @State private var fileBrowserThread: CodexThreadSummary?
     @State private var homeCodeReferences: [CodeReferenceSnippet] = []
+    @State private var showNewAgent = false
 
     var body: some View {
         List {
@@ -136,7 +137,7 @@ struct CodexThreadListView: View {
                 .accessibilityLabel("Refresh agents")
 
                 Button {
-                    codex.startNewThread()
+                    showNewAgent = true
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -162,6 +163,10 @@ struct CodexThreadListView: View {
                 references: $homeCodeReferences
             )
             .environment(codex)
+        }
+        .sheet(isPresented: $showNewAgent) {
+            NewAgentSheet()
+                .environment(codex)
         }
     }
 
@@ -350,6 +355,88 @@ struct CodexThreadRow: View {
         default:
             false
         }
+    }
+}
+
+struct NewAgentSheet: View {
+    @Environment(CodexConnection.self) private var codex
+    @Environment(\.dismiss) private var dismiss
+    @State private var manualPath = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("Project path", text: $manualPath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                    Button {
+                        start(path: manualPath)
+                    } label: {
+                        Label("Start in typed path", systemImage: "plus.circle.fill")
+                    }
+                    .disabled(manualPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !codex.isConnected)
+                } header: {
+                    Text("Manual")
+                }
+
+                Section("Recent Projects") {
+                    ForEach(recentProjectPaths, id: \.self) { path in
+                        Button {
+                            start(path: path)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder")
+                                    .foregroundStyle(.blue)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(projectName(for: path))
+                                        .foregroundStyle(.primary)
+                                    Text(path)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                            }
+                        }
+                        .disabled(!codex.isConnected)
+                    }
+                }
+            }
+            .navigationTitle("New Agent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                manualPath = codex.cwd
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var recentProjectPaths: [String] {
+        var seen: Set<String> = []
+        let paths = ([codex.cwd] + codex.threads.map(\.cwd))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return paths.filter { seen.insert($0).inserted }
+    }
+
+    private func start(path: String) {
+        codex.startNewThread(cwd: path)
+        dismiss()
+    }
+
+    private func projectName(for path: String) -> String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? path : name
     }
 }
 

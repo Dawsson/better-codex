@@ -39,6 +39,12 @@ private struct FileReadAttempt {
     let methodIndex: Int
 }
 
+private struct TranscriptBackfillAttempt {
+    let threadId: String
+    let turnId: String
+    let path: String
+}
+
 @Observable
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
@@ -79,6 +85,7 @@ final class CodexConnection {
     private var requestKinds: [Int: String] = [:]
     private var activeThreadId: String?
     private var activeTurnId: String?
+    private var activeThreadTranscriptPath: String?
     private var activeTurnStartedAt: Date?
     private var entriesByItemId: [String: CodexEntry] = [:]
     private var activeExplorationEntry: CodexEntry?
@@ -95,6 +102,7 @@ final class CodexConnection {
     private var queuedTurns: [QueuedCodexTurn] = []
     private var pendingFileListAttempts: [Int: FileListAttempt] = [:]
     private var pendingFileReadAttempts: [Int: FileReadAttempt] = [:]
+    private var pendingTranscriptBackfills: [Int: TranscriptBackfillAttempt] = [:]
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -185,6 +193,7 @@ final class CodexConnection {
         pendingImageUploads.removeAll()
         pendingFileListAttempts.removeAll()
         pendingFileReadAttempts.removeAll()
+        pendingTranscriptBackfills.removeAll()
         fileBrowserLoadingPaths.removeAll()
         fileBrowserLoadingFiles.removeAll()
         clearQueuedTurns()
@@ -195,6 +204,7 @@ final class CodexConnection {
         if !keepState {
             selectedThread = nil
             activeThreadId = nil
+            activeThreadTranscriptPath = nil
             entries.removeAll()
             entriesByItemId.removeAll()
             resetExplorationState()
@@ -237,10 +247,14 @@ final class CodexConnection {
         )
     }
 
-    func startNewThread() {
+    func startNewThread(cwd requestedCwd: String? = nil) {
         guard isConnected else { return }
+        let trimmedCwd = requestedCwd?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let threadCwd = trimmedCwd.isEmpty ? cwd : trimmedCwd
+        cwd = threadCwd
+        saveSettings()
         let params: [String: Any] = [
-            "cwd": cwd,
+            "cwd": threadCwd,
             "approvalPolicy": "never",
             "sandbox": "danger-full-access",
             "threadSource": "better-codex-ios"
@@ -293,6 +307,7 @@ final class CodexConnection {
         unsubscribeFromActiveThreadIfNeeded(except: thread.id)
         selectedThread = thread
         activeThreadId = thread.id
+        activeThreadTranscriptPath = nil
         entries.removeAll()
         entriesByItemId.removeAll()
         resetExplorationState()
@@ -503,6 +518,39 @@ final class CodexConnection {
         self.subscribedThreadId = nil
     }
 
+    private func requestTranscriptBackfillIfPossible(from thread: [String: Any]? = nil, threadId: String? = nil) {
+        if let path = thread?["path"] as? String, !path.isEmpty {
+            activeThreadTranscriptPath = path
+        }
+        if let threadId {
+            activeThreadId = threadId
+        }
+
+        let selectedIsActive = selectedThread?.status == "active"
+            || selectedThread?.status == "running"
+            || selectedThread?.status == "in_progress"
+        guard isConnected,
+              selectedIsActive,
+              let activeThreadId,
+              let activeTurnId,
+              let path = activeThreadTranscriptPath,
+              !pendingTranscriptBackfills.values.contains(where: { $0.turnId == activeTurnId && $0.path == path }) else {
+            return
+        }
+
+        let id = sendRequest(
+            method: "fs/readFile",
+            params: ["path": path],
+            kind: "transcript/backfill:\(activeThreadId):\(activeTurnId)"
+        )
+        pendingTranscriptBackfills[id] = TranscriptBackfillAttempt(
+            threadId: activeThreadId,
+            turnId: activeTurnId,
+            path: path
+        )
+        diagnosticsStatus = "Backfilling active turn"
+    }
+
     private func receive(on socket: URLSessionWebSocketTask?) {
         socket?.receive { [weak self] result in
             guard let self else { return }
@@ -610,6 +658,10 @@ final class CodexConnection {
 
         if let error = message["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Codex request failed"
+            if pendingTranscriptBackfills.removeValue(forKey: id) != nil {
+                diagnosticsStatus = "Transcript backfill failed: \(errorMessage)"
+                return
+            }
             if handleFileRequestError(id: id, message: errorMessage) {
                 return
             }
@@ -637,6 +689,10 @@ final class CodexConnection {
 
         if let upload = pendingImageUploads.removeValue(forKey: id) {
             finishImageUpload(upload)
+            return
+        }
+
+        if handleTranscriptBackfillSuccess(id: id, result: message["result"] as Any) {
             return
         }
 
@@ -712,6 +768,7 @@ final class CodexConnection {
                         kind: "thread/turns/list:\(threadId)"
                     )
                 }
+                requestTranscriptBackfillIfPossible(from: thread, threadId: threadId)
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/turns/list:") == true {
                 let turns = result["data"] as? [[String: Any]]
@@ -727,6 +784,10 @@ final class CodexConnection {
                     reset: entries.isEmpty,
                     showEmptyState: !selectedIsActive
                 )
+                if selectedIsActive, activeTurnId == nil {
+                    activeTurnId = turns.first?["id"] as? String
+                }
+                requestTranscriptBackfillIfPossible()
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/resume:") == true,
                       let thread = result["thread"] as? [String: Any],
@@ -734,6 +795,7 @@ final class CodexConnection {
                 selectedThread = summary
                 activeThreadId = summary.id
                 subscribedThreadId = summary.id
+                requestTranscriptBackfillIfPossible(from: thread, threadId: summary.id)
                 refreshThread(summary.id)
             }
         }
@@ -1612,6 +1674,158 @@ final class CodexConnection {
             return true
         }
         return false
+    }
+
+    private func handleTranscriptBackfillSuccess(id: Int, result: Any) -> Bool {
+        guard let attempt = pendingTranscriptBackfills.removeValue(forKey: id) else { return false }
+        guard activeThreadId == attempt.threadId else { return true }
+
+        let document = remoteFileDocument(from: result, path: attempt.path)
+        let applied = backfillTranscript(from: document.text, turnId: attempt.turnId)
+        diagnosticsStatus = applied > 0
+            ? "Backfilled \(applied) active items"
+            : "No active backfill items"
+        return true
+    }
+
+    @discardableResult
+    private func backfillTranscript(from jsonl: String, turnId: String) -> Int {
+        var applied = 0
+        let lines = jsonl.split(separator: "\n", omittingEmptySubsequences: true)
+        let recentLines = lines.suffix(2_000)
+        for line in recentLines {
+            guard let data = line.data(using: .utf8),
+                  let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = record["type"] as? String,
+                  let payload = record["payload"] as? [String: Any] else {
+                continue
+            }
+
+            if type == "response_item",
+               let metadata = payload["internal_chat_message_metadata_passthrough"] as? [String: Any],
+               metadata["turn_id"] as? String == turnId,
+               backfillResponseItem(payload) {
+                applied += 1
+            } else if type == "event_msg",
+                      backfillEventMessage(payload, turnId: turnId) {
+                applied += 1
+            }
+        }
+        return applied
+    }
+
+    @discardableResult
+    private func backfillResponseItem(_ item: [String: Any]) -> Bool {
+        guard let type = item["type"] as? String else { return false }
+
+        switch type {
+        case "message":
+            let role = item["role"] as? String ?? "assistant"
+            let text = Self.responseContentText(item["content"] as? [[String: Any]] ?? [])
+            guard !text.isEmpty, let id = item["id"] as? String else { return false }
+            let entry = entriesByItemId[id] ?? append(role == "user" ? .user : .assistant, title: role == "user" ? "You" : "Codex", text: "", itemId: id)
+            entry.text = text
+            transcriptRevision += 1
+            return true
+
+        case "function_call":
+            guard let callId = item["call_id"] as? String else { return false }
+            let name = item["name"] as? String ?? "tool"
+            let arguments = item["arguments"] as? String ?? ""
+            let entry = entriesByItemId[callId] ?? append(.command, title: "running", text: name, itemId: callId)
+            entry.title = "running"
+            entry.text = Self.displayBackfillCommand(name: name, arguments: arguments)
+            transcriptRevision += 1
+            return true
+
+        case "function_call_output":
+            guard let callId = item["call_id"] as? String else { return false }
+            let output = item["output"] as? String ?? ""
+            if let commandEntry = entriesByItemId[callId] {
+                commandEntry.title = "completed"
+                commandEntry.detail = output
+            } else {
+                let entry = entriesByItemId["output-\(callId)"] ?? append(.output, title: "Output", text: "", itemId: "output-\(callId)")
+                entry.text = output
+            }
+            transcriptRevision += 1
+            return true
+
+        case "custom_tool_call":
+            guard let callId = item["call_id"] as? String else { return false }
+            let name = item["name"] as? String ?? "tool"
+            let input = item["input"] as? String ?? ""
+            if name == "apply_patch", !input.isEmpty {
+                let entry = entriesByItemId[callId] ?? append(.diff, title: "Patch", text: "Applied patch", itemId: callId)
+                entry.detail = input
+            } else {
+                let entry = entriesByItemId[callId] ?? append(.tool, title: name, text: "", itemId: callId)
+                entry.text = input
+            }
+            transcriptRevision += 1
+            return true
+
+        case "custom_tool_call_output":
+            guard let callId = item["call_id"] as? String else { return false }
+            let output = item["output"] as? String ?? ""
+            if let entry = entriesByItemId[callId] {
+                entry.detail = output.isEmpty ? entry.detail : output
+            }
+            transcriptRevision += 1
+            return true
+
+        default:
+            return false
+        }
+    }
+
+    @discardableResult
+    private func backfillEventMessage(_ payload: [String: Any], turnId: String) -> Bool {
+        let payloadTurnId = payload["turn_id"] as? String
+            ?? (payload["item"] as? [String: Any])?["turnId"] as? String
+        guard payloadTurnId == turnId else {
+            return false
+        }
+
+        switch payload["type"] as? String {
+        case "patch_apply_end":
+            guard let callId = payload["call_id"] as? String else { return false }
+            let changes = payload["changes"] as? [String: Any] ?? [:]
+            let diff = changes.values.compactMap { value -> String? in
+                (value as? [String: Any])?["unified_diff"] as? String
+            }.joined(separator: "\n")
+            let output = payload["stdout"] as? String ?? ""
+            let entry = entriesByItemId[callId] ?? append(.diff, title: "Patch", text: output, itemId: callId)
+            entry.text = output
+            if !diff.isEmpty { entry.detail = diff }
+            transcriptRevision += 1
+            return true
+
+        default:
+            return false
+        }
+    }
+
+    private static func responseContentText(_ content: [[String: Any]]) -> String {
+        content.compactMap { part -> String? in
+            switch part["type"] as? String {
+            case "output_text", "input_text", "text":
+                return part["text"] as? String
+            default:
+                return nil
+            }
+        }
+        .joined(separator: "\n")
+    }
+
+    private static func displayBackfillCommand(name: String, arguments: String) -> String {
+        guard name == "exec_command",
+              let data = arguments.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let command = json["cmd"] as? String else {
+            return arguments.isEmpty ? name : "\(name) \(arguments)"
+        }
+        return displayCommand(for: command)
     }
 
     private func remoteFileNodes(from result: Any, parentPath: String) -> [RemoteFileNode] {
