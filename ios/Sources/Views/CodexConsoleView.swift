@@ -801,7 +801,7 @@ struct RemoteDirectoryView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 16)
             } else {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 2) {
                     ForEach(visibleRows) { row in
                         if row.entry.isDirectory {
                             Button {
