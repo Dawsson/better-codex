@@ -85,6 +85,8 @@ struct CodexThreadListView: View {
             }
         }
         .listStyle(.plain)
+        .listRowSpacing(0)
+        .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .background(Color(.systemBackground))
         .navigationTitle("Agents")
@@ -893,7 +895,7 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 3) {
             TreeIndentGuides(depth: depth)
 
             if isLoading {
