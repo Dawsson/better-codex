@@ -641,8 +641,18 @@ final class CodexConnection {
                 loadingAgentsById[summary.id] = summary
                 finishLoadingAgent(summary.id)
             } else if kind?.hasPrefix("thread/read:") == true,
-               let thread = result["thread"] as? [String: Any] {
-                loadHistory(from: thread)
+                      let thread = result["thread"] as? [String: Any],
+                      let threadId = threadId(from: kind) {
+                if !loadHistory(from: thread, showEmptyState: false) {
+                    sendRequest(
+                        method: "thread/turns/list",
+                        params: ["threadId": threadId],
+                        kind: "thread/turns/list:\(threadId)"
+                    )
+                }
+                isLoadingThread = false
+            } else if kind?.hasPrefix("thread/turns/list:") == true {
+                loadHistoryFromTurns(result["data"] as? [[String: Any]] ?? [])
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/resume:") == true,
                       let thread = result["thread"] as? [String: Any],
@@ -788,12 +798,28 @@ final class CodexConnection {
         }
     }
 
-    private func loadHistory(from thread: [String: Any]) {
+    @discardableResult
+    private func loadHistory(from thread: [String: Any], showEmptyState: Bool = true) -> Bool {
         entries.removeAll()
         entriesByItemId.removeAll()
         resetExplorationState()
         transcriptRevision += 1
         let turns = thread["turns"] as? [[String: Any]] ?? []
+        return loadHistoryFromTurns(turns, reset: false, showEmptyState: showEmptyState)
+    }
+
+    @discardableResult
+    private func loadHistoryFromTurns(
+        _ turns: [[String: Any]],
+        reset: Bool = true,
+        showEmptyState: Bool = true
+    ) -> Bool {
+        if reset {
+            entries.removeAll()
+            entriesByItemId.removeAll()
+            resetExplorationState()
+            transcriptRevision += 1
+        }
         for turn in turns {
             let items = turn["items"] as? [[String: Any]] ?? []
             for item in items {
@@ -801,9 +827,10 @@ final class CodexConnection {
             }
             endActiveExplorationGroup()
         }
-        if entries.isEmpty {
+        if entries.isEmpty, showEmptyState {
             append(.status, title: "No transcript", text: "This session has no loaded items yet.")
         }
+        return !entries.isEmpty
     }
 
     private func selectFreshThread(_ thread: CodexThreadSummary) {
@@ -1418,7 +1445,7 @@ final class CodexConnection {
     }
 
     private func sendFileListAttempt(path: String, methodIndex: Int) {
-        let methods = ["fs/listDirectory", "fs/readDirectory", "fs/readdir", "fs/list"]
+        let methods = ["fs/readDirectory", "fs/listDirectory", "fs/readdir", "fs/list"]
         guard methodIndex < methods.count else {
             fileBrowserLoadingPaths.remove(path)
             fileBrowserError = "File listing is not available from this app-server."
@@ -1495,7 +1522,7 @@ final class CodexConnection {
             ?? []
 
         return rawEntries.compactMap { entry in
-            let name = stringValue(for: ["name", "basename"], in: entry)
+            let name = stringValue(for: ["name", "fileName", "basename"], in: entry)
                 ?? URL(fileURLWithPath: stringValue(for: ["path", "filePath"], in: entry) ?? "").lastPathComponent
             guard !name.isEmpty else { return nil }
             let path = normalizedFilePath(
