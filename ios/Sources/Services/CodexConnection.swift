@@ -29,6 +29,12 @@ private struct QueuedCodexTurn {
     let images: [CodexImageAttachment]
 }
 
+private struct PendingOptimisticUserEntry {
+    let text: String
+    let imageCount: Int
+    let entry: CodexEntry
+}
+
 private struct FileListAttempt {
     let path: String
     let methodIndex: Int
@@ -106,6 +112,7 @@ final class CodexConnection {
     private var pendingImageTurns: [String: PendingImageTurn] = [:]
     private var pendingImageUploads: [Int: PendingImageUpload] = [:]
     private var queuedTurns: [QueuedCodexTurn] = []
+    private var pendingOptimisticUserEntries: [PendingOptimisticUserEntry] = []
     private var pendingFileListAttempts: [Int: FileListAttempt] = [:]
     private var pendingFileReadAttempts: [Int: FileReadAttempt] = [:]
     private var pendingTranscriptBackfills: [Int: TranscriptBackfillAttempt] = [:]
@@ -204,6 +211,7 @@ final class CodexConnection {
         requestKinds.removeAll()
         pendingImageTurns.removeAll()
         pendingImageUploads.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         pendingFileListAttempts.removeAll()
         pendingFileReadAttempts.removeAll()
         pendingTranscriptBackfills.removeAll()
@@ -220,6 +228,7 @@ final class CodexConnection {
             activeThreadTranscriptPath = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+            pendingOptimisticUserEntries.removeAll()
             resetExplorationState()
             transcriptRevision += 1
         }
@@ -299,6 +308,7 @@ final class CodexConnection {
             activeThreadId = nil
             entries.removeAll()
             entriesByItemId.removeAll()
+            pendingOptimisticUserEntries.removeAll()
             resetExplorationState()
             transcriptRevision += 1
         }
@@ -323,6 +333,7 @@ final class CodexConnection {
         activeThreadTranscriptPath = nil
         entries.removeAll()
         entriesByItemId.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         resetExplorationState()
         transcriptRevision += 1
         isLoadingThread = true
@@ -356,7 +367,12 @@ final class CodexConnection {
             return
         }
 
-        append(.user, title: "You", text: trimmed, images: images)
+        let entry = append(.user, title: "You", text: trimmed, images: images)
+        pendingOptimisticUserEntries.append(PendingOptimisticUserEntry(
+            text: trimmed,
+            imageCount: images.count,
+            entry: entry
+        ))
         sendTurn(threadId: threadId, text: trimmed, images: images)
     }
 
@@ -1026,6 +1042,7 @@ final class CodexConnection {
 
         entries.removeAll()
         entriesByItemId.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         resetExplorationState()
         transcriptRevision += 1
 
@@ -1055,6 +1072,7 @@ final class CodexConnection {
     private func loadHistory(from thread: [String: Any], showEmptyState: Bool = true) -> Bool {
         entries.removeAll()
         entriesByItemId.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         resetExplorationState()
         transcriptRevision += 1
         let turns = thread["turns"] as? [[String: Any]] ?? []
@@ -1070,6 +1088,7 @@ final class CodexConnection {
         if reset {
             entries.removeAll()
             entriesByItemId.removeAll()
+            pendingOptimisticUserEntries.removeAll()
             resetExplorationState()
             transcriptRevision += 1
         }
@@ -1115,6 +1134,7 @@ final class CodexConnection {
         activeThreadId = thread.id
         entries.removeAll()
         entriesByItemId.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         resetExplorationState()
         transcriptRevision += 1
         isLoadingThread = false
@@ -1168,7 +1188,9 @@ final class CodexConnection {
             }.joined(separator: "\n")
             let images = content.compactMap(Self.imageAttachment)
             guard !text.isEmpty || !images.isEmpty else { return }
-            let entry = entriesByItemId[id] ?? append(.user, title: "You", text: "", itemId: id)
+            let entry = entriesByItemId[id]
+                ?? consumeOptimisticUserEntry(text: text, imageCount: images.count, serverItemId: id)
+                ?? append(.user, title: "You", text: "", itemId: id)
             entry.text = text
             entry.images = images
             transcriptRevision += 1
@@ -1244,6 +1266,17 @@ final class CodexConnection {
                 transcriptRevision += 1
             }
         }
+    }
+
+    private func consumeOptimisticUserEntry(text: String, imageCount: Int, serverItemId: String) -> CodexEntry? {
+        guard let index = pendingOptimisticUserEntries.firstIndex(where: {
+            $0.text == text && $0.imageCount == imageCount
+        }) else {
+            return nil
+        }
+        let pending = pendingOptimisticUserEntries.remove(at: index)
+        entriesByItemId[serverItemId] = pending.entry
+        return pending.entry
     }
 
     private func appendFileChangeRequest(_ params: [String: Any], requestId: Int) {
@@ -1837,6 +1870,7 @@ final class CodexConnection {
     private func loadFullTranscript(from jsonl: String) -> Int {
         entries.removeAll()
         entriesByItemId.removeAll()
+        pendingOptimisticUserEntries.removeAll()
         resetExplorationState()
         transcriptRevision += 1
 
