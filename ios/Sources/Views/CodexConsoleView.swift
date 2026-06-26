@@ -893,30 +893,30 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             TreeIndentGuides(depth: depth)
 
             if entry.isDirectory {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 8)
+                    .frame(width: 6)
             } else {
                 Color.clear
-                    .frame(width: 8)
+                    .frame(width: 6)
             }
 
             if isLoading {
                 ProgressView()
                     .controlSize(.mini)
-                    .frame(width: 17)
+                    .frame(width: 15)
             } else {
                 FileIcon(path: entry.path, isDirectory: entry.isDirectory, isExpanded: isExpanded)
-                    .frame(width: 17)
+                    .frame(width: 15)
             }
 
             Text(entry.name)
-                .font(.subheadline.weight(entry.isDirectory ? .medium : .regular))
+                .font(.caption.weight(entry.isDirectory ? .medium : .regular))
                 .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                 .lineLimit(1)
 
@@ -929,8 +929,8 @@ struct RemoteFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .padding(.horizontal, 4)
-        .padding(.vertical, 1)
+        .padding(.horizontal, 3)
+        .padding(.vertical, 0)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
@@ -951,10 +951,10 @@ struct TreeIndentGuides: View {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.12))
                     .frame(width: 1)
-                    .frame(width: 8, alignment: .center)
+                    .frame(width: 6, alignment: .center)
             }
         }
-        .frame(width: CGFloat(depth) * 8)
+        .frame(width: CGFloat(depth) * 6)
     }
 }
 
@@ -1014,15 +1014,15 @@ struct FileIcon: View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(metadata.background)
-                .frame(width: 17, height: 16)
+                .frame(width: 15, height: 14)
             if let label = metadata.label {
                 Text(label)
-                    .font(.system(size: label.count > 2 ? 6 : 7, weight: .bold, design: .rounded))
+                    .font(.system(size: label.count > 2 ? 5 : 6, weight: .bold, design: .rounded))
                     .foregroundStyle(metadata.foreground)
                     .minimumScaleFactor(0.7)
             } else if let symbol = metadata.symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: isDirectory ? 12 : 10, weight: .semibold))
+                    .font(.system(size: isDirectory ? 11 : 9, weight: .semibold))
                     .foregroundStyle(metadata.foreground)
             }
         }
