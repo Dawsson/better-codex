@@ -344,7 +344,6 @@ struct CodexThreadDetailView: View {
                 } label: {
                     Image(systemName: "folder")
                 }
-                .disabled(!codex.isConnected)
                 .accessibilityLabel("Browse files")
             }
         }
@@ -699,6 +698,11 @@ struct FileBrowserSheet: View {
     @Binding var references: [CodeReferenceSnippet]
     @Environment(\.dismiss) private var dismiss
 
+    private var title: String {
+        let name = URL(fileURLWithPath: rootPath).lastPathComponent
+        return name.isEmpty ? "Files" : name
+    }
+
     var body: some View {
         NavigationStack {
             RemoteDirectoryView(
@@ -707,7 +711,7 @@ struct FileBrowserSheet: View {
                 references: $references
             )
             .environment(codex)
-            .navigationTitle("Files")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -737,6 +741,7 @@ struct RemoteDirectoryView: View {
     @Binding var references: [CodeReferenceSnippet]
     @State private var searchText = ""
     @State private var expandedPaths: Set<String> = []
+    @State private var selectedPath: String?
 
     private var rootEntries: [RemoteFileNode] {
         codex.fileBrowserEntriesByPath[path] ?? []
@@ -801,10 +806,13 @@ struct RemoteDirectoryView: View {
                                 rootPath: rootPath,
                                 depth: row.depth,
                                 isExpanded: row.isExpanded,
-                                isLoading: codex.fileBrowserLoadingPaths.contains(row.entry.path)
+                                isLoading: codex.fileBrowserLoadingPaths.contains(row.entry.path),
+                                isSelected: false
                             )
                         }
                         .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+                        .listRowSeparator(.hidden)
                     } else {
                         NavigationLink {
                             RemoteCodeViewer(
@@ -814,16 +822,25 @@ struct RemoteDirectoryView: View {
                             )
                             .environment(codex)
                         } label: {
-                            RemoteFileRow(entry: row.entry, rootPath: rootPath, depth: row.depth)
+                            RemoteFileRow(
+                                entry: row.entry,
+                                rootPath: rootPath,
+                                depth: row.depth,
+                                isSelected: selectedPath == row.entry.path
+                            )
                         }
+                        .simultaneousGesture(TapGesture().onEnded {
+                            selectedPath = row.entry.path
+                        })
+                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+                        .listRowSeparator(.hidden)
                     }
                 }
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find file")
-        .navigationTitle(relativePath(path).isEmpty ? URL(fileURLWithPath: path).lastPathComponent : relativePath(path))
-        .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             codex.loadDirectory(path: path, force: true)
         }
@@ -867,6 +884,7 @@ struct RemoteFileRow: View {
     var depth = 0
     var isExpanded = false
     var isLoading = false
+    var isSelected = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -891,16 +909,10 @@ struct RemoteFileRow: View {
                     .frame(width: 18)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.name)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                Text(entry.path.relativePath(from: rootPath))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            Text(entry.name)
+                .font(.callout.weight(entry.isDirectory ? .medium : .regular))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                .lineLimit(1)
 
             Spacer()
 
@@ -911,7 +923,12 @@ struct RemoteFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
+        )
     }
 
     private func byteCount(_ value: Int) -> String {
@@ -926,12 +943,12 @@ struct TreeIndentGuides: View {
         HStack(spacing: 0) {
             ForEach(0..<depth, id: \.self) { _ in
                 Rectangle()
-                    .fill(Color.secondary.opacity(0.22))
+                    .fill(Color.secondary.opacity(0.18))
                     .frame(width: 1)
-                    .frame(width: 14, alignment: .center)
+                    .frame(width: 13, alignment: .center)
             }
         }
-        .frame(width: CGFloat(depth) * 14)
+        .frame(width: CGFloat(depth) * 13)
     }
 }
 
@@ -983,7 +1000,7 @@ struct FileIcon: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.caption)
+            .font(.caption.weight(isDirectory ? .regular : .medium))
             .foregroundStyle(color)
     }
 }
