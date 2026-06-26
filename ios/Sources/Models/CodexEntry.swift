@@ -130,6 +130,23 @@ private extension String {
     }
 }
 
+extension String {
+    func appendingPathComponent(_ component: String) -> String {
+        let base = hasSuffix("/") ? String(dropLast()) : self
+        return "\(base)/\(component)"
+    }
+
+    func relativePath(from root: String) -> String {
+        let normalizedRoot = root.hasSuffix("/") ? String(root.dropLast()) : root
+        if self == normalizedRoot { return "" }
+        let prefix = normalizedRoot + "/"
+        if hasPrefix(prefix) {
+            return String(dropFirst(prefix.count))
+        }
+        return self
+    }
+}
+
 enum CodexEntryKind: String {
     case user
     case assistant
@@ -197,4 +214,48 @@ struct PendingCodexInput: Identifiable {
     let id: Int
     let questionId: String
     let prompt: String
+}
+
+struct RemoteFileNode: Identifiable, Hashable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let isDirectory: Bool
+    let size: Int?
+
+    var iconName: String {
+        isDirectory ? "folder" : "doc.text"
+    }
+}
+
+struct RemoteFileDocument: Equatable {
+    let path: String
+    let text: String
+    let isTruncated: Bool
+}
+
+struct CodeReferenceSnippet: Identifiable, Equatable {
+    let id: String
+    let path: String
+    let startLine: Int
+    let endLine: Int
+    let text: String
+
+    init(
+        id: String = UUID().uuidString,
+        path: String,
+        startLine: Int,
+        endLine: Int,
+        text: String
+    ) {
+        self.id = id
+        self.path = path
+        self.startLine = startLine
+        self.endLine = endLine
+        self.text = text
+    }
+
+    var location: String {
+        startLine == endLine ? "\(path):\(startLine)" : "\(path):\(startLine)-\(endLine)"
+    }
 }

@@ -28,6 +28,16 @@ private struct QueuedCodexTurn {
     let images: [CodexImageAttachment]
 }
 
+private struct FileListAttempt {
+    let path: String
+    let methodIndex: Int
+}
+
+private struct FileReadAttempt {
+    let path: String
+    let methodIndex: Int
+}
+
 @Observable
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
@@ -50,6 +60,11 @@ final class CodexConnection {
     var isLoadingThread = false
     var transcriptRevision = 0
     var queuedMessages: [QueuedCodexMessage] = []
+    var fileBrowserEntriesByPath: [String: [RemoteFileNode]] = [:]
+    var fileBrowserLoadingPaths: Set<String> = []
+    var fileBrowserDocumentsByPath: [String: RemoteFileDocument] = [:]
+    var fileBrowserLoadingFiles: Set<String> = []
+    var fileBrowserError: String?
 
     var isConnected: Bool { connectionState == .connected }
     var workingStartedAt: Date? { activeTurnStartedAt }
@@ -74,6 +89,8 @@ final class CodexConnection {
     private var pendingImageTurns: [String: PendingImageTurn] = [:]
     private var pendingImageUploads: [Int: PendingImageUpload] = [:]
     private var queuedTurns: [QueuedCodexTurn] = []
+    private var pendingFileListAttempts: [Int: FileListAttempt] = [:]
+    private var pendingFileReadAttempts: [Int: FileReadAttempt] = [:]
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -157,6 +174,10 @@ final class CodexConnection {
         requestKinds.removeAll()
         pendingImageTurns.removeAll()
         pendingImageUploads.removeAll()
+        pendingFileListAttempts.removeAll()
+        pendingFileReadAttempts.removeAll()
+        fileBrowserLoadingPaths.removeAll()
+        fileBrowserLoadingFiles.removeAll()
         clearQueuedTurns()
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
@@ -288,6 +309,34 @@ final class CodexConnection {
 
         append(.user, title: "You", text: trimmed, images: images)
         sendTurn(threadId: threadId, text: trimmed, images: images)
+    }
+
+    func loadDirectory(path: String? = nil, force: Bool = false) {
+        let directoryPath = normalizedFilePath(path ?? selectedThread?.cwd ?? cwd)
+        guard isConnected else {
+            fileBrowserError = "Connect to Codex before browsing files."
+            return
+        }
+        guard force || fileBrowserEntriesByPath[directoryPath] == nil else { return }
+        fileBrowserError = nil
+        fileBrowserLoadingPaths.insert(directoryPath)
+        sendFileListAttempt(path: directoryPath, methodIndex: 0)
+    }
+
+    func loadFile(path: String, force: Bool = false) {
+        let filePath = normalizedFilePath(path)
+        guard isConnected else {
+            fileBrowserError = "Connect to Codex before opening files."
+            return
+        }
+        guard force || fileBrowserDocumentsByPath[filePath] == nil else { return }
+        fileBrowserError = nil
+        fileBrowserLoadingFiles.insert(filePath)
+        sendFileReadAttempt(path: filePath, methodIndex: 0)
+    }
+
+    func clearFileBrowserError() {
+        fileBrowserError = nil
     }
 
     private func sendTurn(threadId: String, text: String, images: [CodexImageAttachment]) {
@@ -437,6 +486,10 @@ final class CodexConnection {
         isLoadingThreads = false
         isLoadingThread = false
         requestKinds.removeAll()
+        pendingFileListAttempts.removeAll()
+        pendingFileReadAttempts.removeAll()
+        fileBrowserLoadingPaths.removeAll()
+        fileBrowserLoadingFiles.removeAll()
         clearQueuedTurns()
 
         guard shouldAutoReconnect else {
@@ -499,6 +552,9 @@ final class CodexConnection {
 
         if let error = message["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Codex request failed"
+            if handleFileRequestError(id: id, message: errorMessage) {
+                return
+            }
             if let upload = pendingImageUploads.removeValue(forKey: id) {
                 failPendingImageTurn(upload.uploadTurnId, message: errorMessage)
                 return
@@ -523,6 +579,10 @@ final class CodexConnection {
 
         if let upload = pendingImageUploads.removeValue(forKey: id) {
             finishImageUpload(upload)
+            return
+        }
+
+        if handleFileRequestSuccess(id: id, result: message["result"] as Any) {
             return
         }
 
@@ -1355,6 +1415,145 @@ final class CodexConnection {
         }
         lastError = "Image upload failed: \(message)"
         append(.error, title: "Image upload failed", text: message)
+    }
+
+    private func sendFileListAttempt(path: String, methodIndex: Int) {
+        let methods = ["fs/listDirectory", "fs/readDirectory", "fs/readdir", "fs/list"]
+        guard methodIndex < methods.count else {
+            fileBrowserLoadingPaths.remove(path)
+            fileBrowserError = "File listing is not available from this app-server."
+            return
+        }
+        let id = sendRequest(
+            method: methods[methodIndex],
+            params: ["path": path],
+            kind: "file/list:\(path)"
+        )
+        pendingFileListAttempts[id] = FileListAttempt(path: path, methodIndex: methodIndex)
+    }
+
+    private func sendFileReadAttempt(path: String, methodIndex: Int) {
+        let methods = ["fs/readFile", "fs/readTextFile", "fs/read"]
+        guard methodIndex < methods.count else {
+            fileBrowserLoadingFiles.remove(path)
+            fileBrowserError = "File reading is not available from this app-server."
+            return
+        }
+        let id = sendRequest(
+            method: methods[methodIndex],
+            params: ["path": path],
+            kind: "file/read:\(path)"
+        )
+        pendingFileReadAttempts[id] = FileReadAttempt(path: path, methodIndex: methodIndex)
+    }
+
+    private func handleFileRequestError(id: Int, message: String) -> Bool {
+        if let attempt = pendingFileListAttempts.removeValue(forKey: id) {
+            sendFileListAttempt(path: attempt.path, methodIndex: attempt.methodIndex + 1)
+            if attempt.methodIndex >= 3 {
+                fileBrowserLoadingPaths.remove(attempt.path)
+                fileBrowserError = message
+            }
+            return true
+        }
+        if let attempt = pendingFileReadAttempts.removeValue(forKey: id) {
+            sendFileReadAttempt(path: attempt.path, methodIndex: attempt.methodIndex + 1)
+            if attempt.methodIndex >= 2 {
+                fileBrowserLoadingFiles.remove(attempt.path)
+                fileBrowserError = message
+            }
+            return true
+        }
+        return false
+    }
+
+    private func handleFileRequestSuccess(id: Int, result: Any) -> Bool {
+        if let attempt = pendingFileListAttempts.removeValue(forKey: id) {
+            let entries = remoteFileNodes(from: result, parentPath: attempt.path)
+            fileBrowserEntriesByPath[attempt.path] = entries
+            fileBrowserLoadingPaths.remove(attempt.path)
+            return true
+        }
+        if let attempt = pendingFileReadAttempts.removeValue(forKey: id) {
+            let document = remoteFileDocument(from: result, path: attempt.path)
+            fileBrowserDocumentsByPath[attempt.path] = document
+            fileBrowserLoadingFiles.remove(attempt.path)
+            return true
+        }
+        return false
+    }
+
+    private func remoteFileNodes(from result: Any, parentPath: String) -> [RemoteFileNode] {
+        let resultDict = result as? [String: Any]
+        let rawEntries =
+            result as? [[String: Any]]
+            ?? resultDict?["entries"] as? [[String: Any]]
+            ?? resultDict?["files"] as? [[String: Any]]
+            ?? resultDict?["children"] as? [[String: Any]]
+            ?? resultDict?["items"] as? [[String: Any]]
+            ?? resultDict?["data"] as? [[String: Any]]
+            ?? []
+
+        return rawEntries.compactMap { entry in
+            let name = stringValue(for: ["name", "basename"], in: entry)
+                ?? URL(fileURLWithPath: stringValue(for: ["path", "filePath"], in: entry) ?? "").lastPathComponent
+            guard !name.isEmpty else { return nil }
+            let path = normalizedFilePath(
+                stringValue(for: ["path", "filePath", "absolutePath"], in: entry)
+                    ?? parentPath.appendingPathComponent(name)
+            )
+            let rawType = (stringValue(for: ["type", "kind"], in: entry) ?? "").lowercased()
+            let isDirectory =
+                (entry["isDirectory"] as? Bool)
+                ?? (entry["directory"] as? Bool)
+                ?? rawType.contains("dir")
+            let size = Self.intValue(entry["size"]) ?? Self.intValue(entry["byteLength"])
+            return RemoteFileNode(name: name, path: path, isDirectory: isDirectory, size: size)
+        }
+        .filter { !$0.name.hasPrefix(".git") && $0.name != "node_modules" }
+        .sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory && !rhs.isDirectory }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func remoteFileDocument(from result: Any, path: String) -> RemoteFileDocument {
+        let maxCharacters = 240_000
+        let resultDict = result as? [String: Any]
+        let rawText: String
+        if let text = result as? String {
+            rawText = text
+        } else if let dataBase64 = resultDict?["dataBase64"] as? String,
+           let data = Data(base64Encoded: dataBase64),
+           let decoded = String(data: data, encoding: .utf8) {
+            rawText = decoded
+        } else if let dataBase64 = resultDict?["base64"] as? String,
+                  let data = Data(base64Encoded: dataBase64),
+                  let decoded = String(data: data, encoding: .utf8) {
+            rawText = decoded
+        } else {
+            rawText =
+                resultDict?["text"] as? String
+                ?? resultDict?["content"] as? String
+                ?? resultDict?["data"] as? String
+                ?? resultDict?["contents"] as? String
+                ?? ""
+        }
+        let isTruncated = rawText.count > maxCharacters
+        let text = isTruncated ? String(rawText.prefix(maxCharacters)) : rawText
+        return RemoteFileDocument(path: path, text: text, isTruncated: isTruncated)
+    }
+
+    private func normalizedFilePath(_ path: String) -> String {
+        guard path.count > 1 else { return path }
+        return path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? String { return Int(value) }
+        return nil
     }
 
     @discardableResult

@@ -327,6 +327,8 @@ struct CodexThreadDetailView: View {
     @State private var isProcessingImages = false
     @State private var imageError: String?
     @State private var isNearBottom = true
+    @State private var showFileBrowser = false
+    @State private var codeReferences: [CodeReferenceSnippet] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -334,8 +336,26 @@ struct CodexThreadDetailView: View {
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showFileBrowser = true
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .disabled(!codex.isConnected)
+                .accessibilityLabel("Browse files")
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomInputBar
+        }
+        .sheet(isPresented: $showFileBrowser) {
+            FileBrowserSheet(
+                rootPath: thread.cwd.isEmpty ? codex.cwd : thread.cwd,
+                references: $codeReferences
+            )
+            .environment(codex)
         }
         .onAppear {
             codex.openThread(thread)
@@ -423,6 +443,12 @@ struct CodexThreadDetailView: View {
                 QueuedMessagesStrip(messages: codex.queuedMessages)
             }
 
+            if !codeReferences.isEmpty {
+                CodeReferenceStrip(references: $codeReferences) {
+                    showFileBrowser = true
+                }
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
                 PhotosPicker(
                     selection: $selectedPhotoItems,
@@ -454,11 +480,12 @@ struct CodexThreadDetailView: View {
                     .disabled(!codex.isConnected)
 
                 Button {
-                    let text = prompt
+                    let text = promptWithReferences(prompt)
                     let images = selectedImages
                     prompt = ""
                     selectedImages = []
                     selectedPhotoItems = []
+                    codeReferences.removeAll()
                     codex.sendPrompt(text, images: images)
                 } label: {
                     Image(systemName: "arrow.up")
@@ -490,7 +517,7 @@ struct CodexThreadDetailView: View {
     private var canSend: Bool {
         codex.isConnected
             && !isProcessingImages
-            && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedImages.isEmpty)
+            && (!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedImages.isEmpty || !codeReferences.isEmpty)
     }
 
     private var sendColor: Color {
@@ -507,6 +534,23 @@ struct CodexThreadDetailView: View {
         } else {
             action()
         }
+    }
+
+    private func promptWithReferences(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !codeReferences.isEmpty else { return trimmed }
+        let references = codeReferences.map { reference in
+            """
+            File reference: \(reference.location)
+            ```\(languageForPath(reference.path))
+            \(reference.text)
+            ```
+            """
+        }.joined(separator: "\n\n")
+        if trimmed.isEmpty {
+            return references
+        }
+        return "\(trimmed)\n\nReferenced code:\n\n\(references)"
     }
 
     @MainActor
@@ -596,6 +640,515 @@ struct QueuedMessagesStrip: View {
             return text
         }
         return "\(message.imageCount) image\(message.imageCount == 1 ? "" : "s")"
+    }
+}
+
+struct CodeReferenceStrip: View {
+    @Binding var references: [CodeReferenceSnippet]
+    let browseAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Label("\(references.count) code reference\(references.count == 1 ? "" : "s")", systemImage: "curlybraces")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue)
+                Spacer()
+                Button("Add") {
+                    browseAction()
+                }
+                .font(.caption.weight(.semibold))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(references) { reference in
+                        HStack(spacing: 6) {
+                            Text(reference.location)
+                                .font(.caption2.monospaced())
+                                .lineLimit(1)
+                            Button {
+                                references.removeAll { $0.id == reference.id }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.10), in: Capsule())
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(
+            Color.blue.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+    }
+}
+
+struct FileBrowserSheet: View {
+    @Environment(CodexConnection.self) private var codex
+    let rootPath: String
+    @Binding var references: [CodeReferenceSnippet]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            RemoteDirectoryView(
+                path: rootPath,
+                rootPath: rootPath,
+                references: $references
+            )
+            .environment(codex)
+            .navigationTitle("Files")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text("\(references.count)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(references.isEmpty ? Color.secondary : Color.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .accessibilityLabel("\(references.count) code references")
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+struct RemoteDirectoryView: View {
+    @Environment(CodexConnection.self) private var codex
+    let path: String
+    let rootPath: String
+    @Binding var references: [CodeReferenceSnippet]
+    @State private var searchText = ""
+
+    private var entries: [RemoteFileNode] {
+        let values = codex.fileBrowserEntriesByPath[path] ?? []
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return values }
+        return values.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.path.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var body: some View {
+        List {
+            if codex.fileBrowserLoadingPaths.contains(path), entries.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading files")
+                        .foregroundStyle(.secondary)
+                }
+            } else if entries.isEmpty {
+                ContentUnavailableView(
+                    searchText.isEmpty ? "No files" : "No matches",
+                    systemImage: "folder",
+                    description: Text(relativePath(path).isEmpty ? path : relativePath(path))
+                )
+                .listRowSeparator(.hidden)
+            } else {
+                ForEach(entries) { entry in
+                    if entry.isDirectory {
+                        NavigationLink {
+                            RemoteDirectoryView(
+                                path: entry.path,
+                                rootPath: rootPath,
+                                references: $references
+                            )
+                            .environment(codex)
+                        } label: {
+                            RemoteFileRow(entry: entry, rootPath: rootPath)
+                        }
+                    } else {
+                        NavigationLink {
+                            RemoteCodeViewer(
+                                path: entry.path,
+                                rootPath: rootPath,
+                                references: $references
+                            )
+                            .environment(codex)
+                        } label: {
+                            RemoteFileRow(entry: entry, rootPath: rootPath)
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find file")
+        .navigationTitle(relativePath(path).isEmpty ? URL(fileURLWithPath: path).lastPathComponent : relativePath(path))
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            codex.loadDirectory(path: path, force: true)
+        }
+        .overlay(alignment: .bottom) {
+            if let error = codex.fileBrowserError {
+                ErrorToast(message: error) {
+                    codex.clearFileBrowserError()
+                }
+                .padding()
+            }
+        }
+        .onAppear {
+            codex.loadDirectory(path: path)
+        }
+    }
+
+    private func relativePath(_ value: String) -> String {
+        value.relativePath(from: rootPath)
+    }
+}
+
+struct RemoteFileRow: View {
+    let entry: RemoteFileNode
+    let rootPath: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: entry.iconName)
+                .font(.body)
+                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(entry.path.relativePath(from: rootPath))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            if let size = entry.size, !entry.isDirectory {
+                Text(byteCount(size))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func byteCount(_ value: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+}
+
+struct RemoteCodeViewer: View {
+    @Environment(CodexConnection.self) private var codex
+    let path: String
+    let rootPath: String
+    @Binding var references: [CodeReferenceSnippet]
+    @State private var selectedRange = NSRange(location: 0, length: 0)
+    @State private var showAdded = false
+
+    private var document: RemoteFileDocument? {
+        codex.fileBrowserDocumentsByPath[path]
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let document {
+                SelectableCodeTextView(
+                    text: document.text,
+                    language: languageForPath(path),
+                    selectedRange: $selectedRange
+                )
+                .overlay(alignment: .bottomLeading) {
+                    if document.isTruncated {
+                        Label("File preview truncated", systemImage: "scissors")
+                            .font(.caption.weight(.medium))
+                            .padding(8)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding()
+                    }
+                }
+            } else if codex.fileBrowserLoadingFiles.contains(path) {
+                ProgressView("Opening file")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "No preview",
+                    systemImage: "doc.text",
+                    description: Text(path.relativePath(from: rootPath))
+                )
+            }
+        }
+        .navigationTitle(URL(fileURLWithPath: path).lastPathComponent)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button {
+                    addCurrentSelection()
+                } label: {
+                    Label("Add Selection", systemImage: "plus.square.on.square")
+                }
+                .disabled(!canAddSelection)
+
+                Spacer()
+
+                Button {
+                    addWholeFileReference()
+                } label: {
+                    Label("File", systemImage: "doc.badge.plus")
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if showAdded {
+                Label("Reference added", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            codex.loadFile(path: path)
+        }
+    }
+
+    private var canAddSelection: Bool {
+        selectedRange.length > 0 && document != nil
+    }
+
+    private func addCurrentSelection() {
+        guard let document,
+              let snippet = CodeSelectionMapper.snippet(
+                in: document.text,
+                path: path.relativePath(from: rootPath),
+                range: selectedRange
+              ) else { return }
+        references.append(snippet)
+        flashAdded()
+    }
+
+    private func addWholeFileReference() {
+        guard let document else { return }
+        let lines = max(1, document.text.split(separator: "\n", omittingEmptySubsequences: false).count)
+        let text = String(document.text.prefix(20_000))
+        references.append(
+            CodeReferenceSnippet(
+                path: path.relativePath(from: rootPath),
+                startLine: 1,
+                endLine: lines,
+                text: text
+            )
+        )
+        flashAdded()
+    }
+
+    private func flashAdded() {
+        HapticManager.shared.sent()
+        withAnimation(.snappy(duration: 0.16)) {
+            showAdded = true
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.1))
+            withAnimation(.snappy(duration: 0.16)) {
+                showAdded = false
+            }
+        }
+    }
+}
+
+struct SelectableCodeTextView: UIViewRepresentable {
+    let text: String
+    let language: String
+    @Binding var selectedRange: NSRange
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.alwaysBounceVertical = true
+        textView.backgroundColor = .systemBackground
+        textView.textContainerInset = UIEdgeInsets(top: 14, left: 12, bottom: 40, right: 12)
+        textView.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.smartQuotesType = .no
+        textView.smartDashesType = .no
+        textView.keyboardDismissMode = .interactive
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if context.coordinator.lastText != text {
+            context.coordinator.lastText = text
+            textView.attributedText = CodeAttributedStringBuilder.attributed(text, language: language)
+            textView.selectedRange = selectedRange
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selectedRange: $selectedRange)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding var selectedRange: NSRange
+        var lastText = ""
+
+        init(selectedRange: Binding<NSRange>) {
+            self._selectedRange = selectedRange
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            selectedRange = textView.selectedRange
+        }
+    }
+}
+
+enum CodeSelectionMapper {
+    static func snippet(in text: String, path: String, range: NSRange) -> CodeReferenceSnippet? {
+        guard range.length > 0,
+              let swiftRange = Range(range, in: text) else { return nil }
+        let selectedText = String(text[swiftRange]).trimmingCharacters(in: .newlines)
+        guard !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let startLine = lineNumber(at: range.location, in: text)
+        let endLine = lineNumber(at: range.location + max(0, range.length - 1), in: text)
+        return CodeReferenceSnippet(
+            path: path,
+            startLine: startLine,
+            endLine: max(startLine, endLine),
+            text: selectedText
+        )
+    }
+
+    private static func lineNumber(at utf16Offset: Int, in text: String) -> Int {
+        let clamped = max(0, min(utf16Offset, text.utf16.count))
+        let index = String.Index(utf16Offset: clamped, in: text)
+        return text[..<index].reduce(1) { count, character in
+            character == "\n" ? count + 1 : count
+        }
+    }
+}
+
+enum CodeAttributedStringBuilder {
+    static func attributed(_ code: String, language: String) -> NSAttributedString {
+        let baseFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let result = NSMutableAttributedString(
+            string: code,
+            attributes: [
+                .font: baseFont,
+                .foregroundColor: UIColor.label
+            ]
+        )
+
+        let nsCode = code as NSString
+        let fullRange = NSRange(location: 0, length: nsCode.length)
+        color(pattern: #"(?m)^\s*(//|#).*$"#, in: code, range: fullRange, color: .secondaryLabel, result: result)
+        color(pattern: #""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'"#, in: code, range: fullRange, color: .systemGreen, result: result)
+        color(pattern: #"\b\d+(?:\.\d+)?\b"#, in: code, range: fullRange, color: .systemOrange, result: result)
+        color(pattern: keywordPattern(for: language), in: code, range: fullRange, color: .systemBlue, result: result)
+        return result
+    }
+
+    private static func color(
+        pattern: String,
+        in code: String,
+        range: NSRange,
+        color: UIColor,
+        result: NSMutableAttributedString
+    ) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+        regex.enumerateMatches(in: code, range: range) { match, _, _ in
+            guard let match else { return }
+            result.addAttribute(.foregroundColor, value: color, range: match.range)
+        }
+    }
+
+    private static func keywordPattern(for language: String) -> String {
+        switch language {
+        case "swift":
+            return #"\b(actor|any|as|async|await|case|catch|class|enum|extension|final|for|func|guard|if|import|in|let|private|protocol|public|return|self|static|struct|switch|throw|try|var|while)\b"#
+        case "js", "jsx", "ts", "tsx":
+            return #"\b(async|await|break|case|catch|class|const|export|extends|function|if|import|let|new|return|switch|throw|try|type|var|while)\b"#
+        default:
+            return #"\b(class|const|def|enum|for|func|function|if|import|let|return|struct|var|while)\b"#
+        }
+    }
+}
+
+struct ErrorToast: View {
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .lineLimit(2)
+            Spacer(minLength: 6)
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(11)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+func languageForPath(_ path: String) -> String {
+    switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+    case "swift":
+        return "swift"
+    case "js", "mjs", "cjs":
+        return "js"
+    case "jsx":
+        return "jsx"
+    case "ts":
+        return "ts"
+    case "tsx":
+        return "tsx"
+    case "json":
+        return "json"
+    case "md", "markdown":
+        return "markdown"
+    case "sh", "bash", "zsh":
+        return "sh"
+    case "yml", "yaml":
+        return "yaml"
+    case "html", "htm":
+        return "html"
+    case "css":
+        return "css"
+    case "py":
+        return "python"
+    case "rs":
+        return "rust"
+    case "go":
+        return "go"
+    default:
+        return ""
     }
 }
 
