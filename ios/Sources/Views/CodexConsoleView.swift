@@ -497,13 +497,19 @@ struct CodexThreadDetailView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if codex.isLoadingThread && codex.entries.isEmpty {
-                        ProgressView("Loading transcript")
-                            .frame(maxWidth: .infinity, minHeight: 300)
+                        VStack(spacing: 10) {
+                            ProgressView("Loading transcript")
+                            Text(codex.diagnosticsStatus)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 300)
                     } else if codex.entries.isEmpty {
                         ContentUnavailableView(
                             "No transcript",
                             systemImage: "terminal",
-                            description: Text("Send a message to start this agent.")
+                            description: Text(codex.diagnosticsStatus)
                         )
                         .frame(maxWidth: .infinity, minHeight: 300)
                     }

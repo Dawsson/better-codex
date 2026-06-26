@@ -52,6 +52,7 @@ const transcriptHeadEntries = Number(env.BETTER_CODEX_TRANSCRIPT_HEAD_ENTRIES ??
 const transcriptTailEntries = Number(env.BETTER_CODEX_TRANSCRIPT_TAIL_ENTRIES ?? 420);
 const transcriptMaxTextChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_TEXT_CHARS ?? 8_000);
 const transcriptMaxDetailChars = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_DETAIL_CHARS ?? 2_500);
+const transcriptMaxPayloadBytes = Number(env.BETTER_CODEX_TRANSCRIPT_MAX_PAYLOAD_BYTES ?? 750_000);
 
 if (!upstreamToken) {
   throw new Error("Missing CODEX_APP_SERVER_TOKEN or CODEX_APP_SERVER_TOKEN_FILE");
@@ -239,10 +240,14 @@ function handleBridgeResumeResponse(pending: PendingUpstreamRequest, message: Rp
   const result = isObject(message.result) ? message.result : {};
   const thread = isObject(result.thread) ? result.thread : {};
   const transcript = transcriptEntriesForThread(thread);
+  const summaryThread = { ...thread };
+  delete summaryThread.turns;
+  delete summaryThread.items;
   send(client.socket, {
     id: pending.clientRequestId,
     result: {
       ...result,
+      thread: summaryThread,
       bridgeTranscript: {
         entries: transcript.entries,
         totalEntries: transcript.totalEntries,
@@ -553,12 +558,13 @@ function upsertEntry(entries: TranscriptEntry[], entriesById: Map<string, Transc
 
 function compactTranscriptEntries(entries: TranscriptEntry[]) {
   const maxEntries = transcriptHeadEntries + transcriptTailEntries;
-  if (entries.length <= maxEntries) return entries;
+  const entryBudgetBytes = Math.max(100_000, transcriptMaxPayloadBytes - 50_000);
+  if (entries.length <= maxEntries) return fitTranscriptEntriesToBudget(entries, entryBudgetBytes);
 
   const head = entries.slice(0, transcriptHeadEntries);
   const tail = entries.slice(-transcriptTailEntries);
   const omitted = entries.length - head.length - tail.length;
-  return [
+  return fitTranscriptEntriesToBudget([
     ...head,
     {
       id: `bridge-omitted-${omitted}`,
@@ -567,7 +573,56 @@ function compactTranscriptEntries(entries: TranscriptEntry[]) {
       text: `Skipped ${omitted.toLocaleString()} older items. Showing the beginning and the latest activity.`,
     } satisfies TranscriptEntry,
     ...tail,
-  ];
+  ], entryBudgetBytes);
+}
+
+function fitTranscriptEntriesToBudget(entries: TranscriptEntry[], maxBytes: number) {
+  let next = entries.map((entry) => ({ ...entry }));
+  if (jsonByteLength(next) <= maxBytes) return next;
+
+  next = next.map((entry) => {
+    if (!entry.detail) return entry;
+    return {
+      ...entry,
+      detail: truncateField(entry.detail, Math.min(600, transcriptMaxDetailChars)),
+    };
+  });
+  if (jsonByteLength(next) <= maxBytes) return next;
+
+  next = next.map((entry) => {
+    if (entry.kind === "user" || entry.kind === "assistant" || entry.kind === "diff") {
+      return {
+        ...entry,
+        text: truncateField(entry.text, Math.min(4_000, transcriptMaxTextChars)),
+        detail: entry.detail ? truncateField(entry.detail, 600) : entry.detail,
+      };
+    }
+    return {
+      ...entry,
+      text: truncateField(entry.text, Math.min(500, transcriptMaxTextChars)),
+      detail: entry.detail ? truncateField(entry.detail, 300) : entry.detail,
+    };
+  });
+  if (jsonByteLength(next) <= maxBytes) return next;
+
+  const keepHead = Math.min(transcriptHeadEntries, 20);
+  const middleStatus: TranscriptEntry = {
+    id: "bridge-size-compacted",
+    kind: "status",
+    title: "Transcript compacted",
+    text: "Some command/output details were compacted so this transcript can load reliably on mobile.",
+  };
+  while (next.length > keepHead + 50 && jsonByteLength(next) > maxBytes) {
+    const head = next.slice(0, keepHead);
+    const tail = next.slice(-(next.length - keepHead - 1));
+    tail.shift();
+    next = [...head, middleStatus, ...tail];
+  }
+  return next;
+}
+
+function jsonByteLength(value: unknown) {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
 function truncateField(value: string, maxChars: number) {

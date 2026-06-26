@@ -61,7 +61,7 @@ private enum TranscriptLoadMode: Equatable {
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8877"
     static let defaultCwd = "/Users/dawson/projects/hosting-platform"
-    static let buildLabel = "2026-06-25-live-refresh"
+    static let buildLabel = "2026-06-26-transcript-debug"
     private static let cachedThreadsKey = "codex_cached_threads"
     private static let hiddenThreadIdsKey = "codex_hidden_thread_ids"
     private static let logger = Logger(subsystem: "com.dawson.bettercodex", category: "CodexConnection")
@@ -327,6 +327,11 @@ final class CodexConnection {
             return
         }
 
+        if activeThreadId == thread.id, isLoadingThread || !entries.isEmpty {
+            Self.logger.info("Skipping duplicate openThread id=\(thread.id, privacy: .public) loading=\(self.isLoadingThread, privacy: .public) entries=\(self.entries.count, privacy: .public)")
+            return
+        }
+
         unsubscribeFromActiveThreadIfNeeded(except: thread.id)
         selectedThread = thread
         activeThreadId = thread.id
@@ -337,13 +342,16 @@ final class CodexConnection {
         resetExplorationState()
         transcriptRevision += 1
         isLoadingThread = true
+        let threadCwd = thread.cwd.isEmpty ? cwd : thread.cwd
+        diagnosticsStatus = "Resuming \(thread.id)"
+        Self.logger.info("Opening thread id=\(thread.id, privacy: .public) cwd=\(threadCwd, privacy: .public)")
         pendingInput = nil
         clearQueuedTurns()
         sendRequest(
             method: "bridge/thread/resume",
             params: [
                 "threadId": thread.id,
-                "cwd": thread.cwd.isEmpty ? cwd : thread.cwd,
+                "cwd": threadCwd,
                 "approvalPolicy": "never",
                 "sandbox": "danger-full-access"
             ],
@@ -693,8 +701,30 @@ final class CodexConnection {
     }
 
     private func handle(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let data = text.data(using: .utf8) else {
+            DispatchQueue.main.async {
+                self.diagnosticsStatus = "WebSocket text was not UTF-8"
+                Self.logger.error("WebSocket text was not UTF-8")
+            }
+            return
+        }
+
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            DispatchQueue.main.async {
+                self.diagnosticsStatus = "JSON parse failed for \(data.count / 1024) KB"
+                Self.logger.error("JSON parse failed bytes=\(data.count, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
+            return
+        }
+
+        guard let message = parsed as? [String: Any] else {
+            DispatchQueue.main.async {
+                self.diagnosticsStatus = "Unexpected WebSocket JSON"
+                Self.logger.error("Unexpected WebSocket JSON bytes=\(data.count, privacy: .public)")
+            }
             return
         }
 
@@ -1037,8 +1067,12 @@ final class CodexConnection {
     private func loadBridgeTranscriptIfPresent(_ result: [String: Any]) -> Bool {
         guard let transcript = result["bridgeTranscript"] as? [String: Any],
               let rawEntries = transcript["entries"] as? [[String: Any]] else {
+            diagnosticsStatus = "No bridge transcript in resume response"
+            Self.logger.error("Resume response missing bridgeTranscript")
             return false
         }
+
+        Self.logger.info("Loading bridge transcript rawEntries=\(rawEntries.count, privacy: .public) total=\(Self.intValue(transcript["totalEntries"]) ?? -1, privacy: .public) omitted=\(Self.intValue(transcript["omittedEntries"]) ?? -1, privacy: .public)")
 
         entries.removeAll()
         entriesByItemId.removeAll()
@@ -1066,6 +1100,7 @@ final class CodexConnection {
             guard let id = rawEntry["id"] as? String,
                   let rawKind = rawEntry["kind"] as? String,
                   let kind = CodexEntryKind(rawValue: rawKind) else {
+                Self.logger.error("Skipping invalid bridge transcript entry")
                 continue
             }
             let entry = append(
@@ -1078,6 +1113,7 @@ final class CodexConnection {
         }
 
         diagnosticsStatus = "Loaded \(entries.count) bridge transcript items"
+        Self.logger.info("Loaded bridge transcript entries=\(self.entries.count, privacy: .public)")
         if entries.isEmpty {
             append(.status, title: "No transcript", text: "This session has no loaded items yet.")
         }
