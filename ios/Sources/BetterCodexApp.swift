@@ -5,6 +5,10 @@ struct BetterCodexApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var codex = CodexConnection()
 
+    init() {
+        UIScrollView.appearance().scrollsToTop = false
+    }
+
     var body: some Scene {
         WindowGroup {
             CodexConsoleView()

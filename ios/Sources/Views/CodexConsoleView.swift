@@ -2274,6 +2274,16 @@ struct MarkdownText: View {
                         InlineMarkdownText(line)
                             .foregroundStyle(foregroundStyle)
                     }
+                case .numbered(let number, let line):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(number).")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .frame(minWidth: 22, alignment: .trailing)
+                        InlineMarkdownText(line)
+                            .foregroundStyle(foregroundStyle)
+                    }
+                    .padding(.leading, 8)
                 case .paragraph(let line):
                     InlineMarkdownText(line)
                         .foregroundStyle(foregroundStyle)
@@ -2316,6 +2326,8 @@ struct MarkdownText: View {
                 result.append(.heading(String(line.dropFirst(2))))
             } else if line.hasPrefix("- ") {
                 result.append(.bullet(String(line.dropFirst(2))))
+            } else if let numbered = Self.numberedListItem(from: rawLine) {
+                result.append(.numbered(numbered.number, numbered.text))
             } else {
                 result.append(.paragraph(rawLine))
             }
@@ -2336,12 +2348,25 @@ struct MarkdownText: View {
             .map(String.init)
         return language?.isEmpty == false ? language : nil
     }
+
+    private static func numberedListItem(from line: String) -> (number: String, text: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
+        let number = String(trimmed[..<dotIndex])
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        let afterDot = trimmed[trimmed.index(after: dotIndex)...]
+        guard afterDot.first?.isWhitespace == true else { return nil }
+        let text = afterDot.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        return (number, text)
+    }
 }
 
 enum MarkdownBlock {
     case paragraph(String)
     case heading(String)
     case bullet(String)
+    case numbered(String, String)
     case code(String, String?)
 }
 

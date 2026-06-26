@@ -300,11 +300,6 @@ final class CodexConnection {
         clearQueuedTurns()
         refreshThread(thread.id)
         sendRequest(
-            method: "thread/read",
-            params: ["threadId": thread.id, "includeTurns": true],
-            kind: "thread/read:\(thread.id)"
-        )
-        sendRequest(
             method: "thread/resume",
             params: [
                 "threadId": thread.id,
@@ -717,6 +712,7 @@ final class CodexConnection {
                       let summary = CodexThreadSummary(json: thread) {
                 selectedThread = summary
                 activeThreadId = summary.id
+                refreshThread(summary.id)
             }
         }
     }
@@ -1031,7 +1027,11 @@ final class CodexConnection {
     }
 
     private func belongsToActiveThread(_ params: [String: Any]) -> Bool {
-        guard let threadId = params["threadId"] as? String else { return true }
+        let threadId = params["threadId"] as? String
+            ?? (params["thread"] as? [String: Any])?["id"] as? String
+            ?? (params["turn"] as? [String: Any])?["threadId"] as? String
+            ?? (params["item"] as? [String: Any])?["threadId"] as? String
+        guard let threadId else { return true }
         return activeThreadId == nil || activeThreadId == threadId
     }
 
