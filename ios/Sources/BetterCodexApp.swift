@@ -12,10 +12,11 @@ struct BetterCodexApp: App {
                 .preferredColorScheme(.dark)
                 .onAppear {
                     NotificationManager.shared.requestPermission()
+                    codex.refreshAfterForeground()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
-                        codex.reconnectIfNeeded()
+                        codex.refreshAfterForeground()
                     }
                 }
                 .onOpenURL { url in

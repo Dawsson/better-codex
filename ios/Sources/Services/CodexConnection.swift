@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 private struct PendingImageTurn {
     let threadId: String
@@ -42,8 +43,10 @@ private struct FileReadAttempt {
 final class CodexConnection {
     static let defaultServerURL = "ws://100.108.73.69:8876"
     static let defaultCwd = "/Users/dawson/projects/hosting-platform"
+    static let buildLabel = "2026-06-25-live-refresh"
     private static let cachedThreadsKey = "codex_cached_threads"
     private static let hiddenThreadIdsKey = "codex_hidden_thread_ids"
+    private static let logger = Logger(subsystem: "com.dawson.bettercodex", category: "CodexConnection")
 
     var threads: [CodexThreadSummary] = []
     var selectedThread: CodexThreadSummary?
@@ -65,6 +68,7 @@ final class CodexConnection {
     var fileBrowserDocumentsByPath: [String: RemoteFileDocument] = [:]
     var fileBrowserLoadingFiles: Set<String> = []
     var fileBrowserError: String?
+    var diagnosticsStatus = "Build \(CodexConnection.buildLabel)"
 
     var isConnected: Bool { connectionState == .connected }
     var workingStartedAt: Date? { activeTurnStartedAt }
@@ -104,6 +108,8 @@ final class CodexConnection {
         hiddenThreadIds = Self.loadHiddenThreadIds(from: defaults)
         threads = Self.loadCachedThreads(from: defaults)
             .filter { !hiddenThreadIds.contains($0.id) }
+        diagnosticsStatus = "Launched \(Self.buildLabel) with \(threads.count) cached threads"
+        Self.logger.info("Better Codex launch build=\(Self.buildLabel, privacy: .public) cachedThreads=\(self.threads.count, privacy: .public)")
     }
 
     func saveSettings() {
@@ -143,6 +149,8 @@ final class CodexConnection {
             return
         }
 
+        Self.logger.info("Connecting to \(self.serverURL, privacy: .public) build=\(Self.buildLabel, privacy: .public)")
+        diagnosticsStatus = "Connecting to \(serverURL)"
         saveSettings()
         closeSocket()
         shouldAutoReconnect = true
@@ -195,12 +203,28 @@ final class CodexConnection {
 
     func reconnectIfNeeded() {
         if connectionState == .disconnected, !bearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Self.logger.info("Reconnect requested from disconnected state")
             connect()
+        }
+    }
+
+    func refreshAfterForeground() {
+        Self.logger.info("Foreground refresh state=\(String(describing: self.connectionState), privacy: .public) selected=\(self.selectedThread?.id ?? "none", privacy: .public)")
+        diagnosticsStatus = "Foreground refresh: \(Self.shortTimeString())"
+        guard isConnected else {
+            reconnectIfNeeded()
+            return
+        }
+        refreshThreads()
+        if let selectedThread {
+            refreshThread(selectedThread.id)
         }
     }
 
     func refreshThreads() {
         guard isConnected else { return }
+        Self.logger.info("Refreshing thread list")
+        diagnosticsStatus = "Refreshing threads: \(Self.shortTimeString())"
         isLoadingThreads = true
         loadingAgentIds.removeAll()
         loadingAgentsById.removeAll()
@@ -274,11 +298,7 @@ final class CodexConnection {
         isLoadingThread = true
         pendingInput = nil
         clearQueuedTurns()
-        sendRequest(
-            method: "thread/turns/list",
-            params: ["threadId": thread.id],
-            kind: "thread/turns/list:\(thread.id)"
-        )
+        refreshThread(thread.id)
         sendRequest(
             method: "thread/read",
             params: ["threadId": thread.id, "includeTurns": true],
@@ -319,12 +339,16 @@ final class CodexConnection {
     func loadDirectory(path: String? = nil, force: Bool = false) {
         let directoryPath = normalizedFilePath(path ?? selectedThread?.cwd ?? cwd)
         guard isConnected else {
+            Self.logger.info("Queueing directory load until reconnect path=\(directoryPath, privacy: .public)")
+            diagnosticsStatus = "Waiting to load files until reconnect"
             fileBrowserError = nil
             fileBrowserLoadingPaths.insert(directoryPath)
             reconnectIfNeeded()
             return
         }
         guard force || fileBrowserEntriesByPath[directoryPath] == nil else { return }
+        Self.logger.info("Loading directory path=\(directoryPath, privacy: .public) force=\(force, privacy: .public)")
+        diagnosticsStatus = "Loading folder: \(URL(fileURLWithPath: directoryPath).lastPathComponent)"
         fileBrowserError = nil
         fileBrowserLoadingPaths.insert(directoryPath)
         sendFileListAttempt(path: directoryPath, methodIndex: 0)
@@ -333,12 +357,16 @@ final class CodexConnection {
     func loadFile(path: String, force: Bool = false) {
         let filePath = normalizedFilePath(path)
         guard isConnected else {
+            Self.logger.info("Queueing file load until reconnect path=\(filePath, privacy: .public)")
+            diagnosticsStatus = "Waiting to load file until reconnect"
             fileBrowserError = nil
             fileBrowserLoadingFiles.insert(filePath)
             reconnectIfNeeded()
             return
         }
         guard force || fileBrowserDocumentsByPath[filePath] == nil else { return }
+        Self.logger.info("Loading file path=\(filePath, privacy: .public) force=\(force, privacy: .public)")
+        diagnosticsStatus = "Loading file: \(URL(fileURLWithPath: filePath).lastPathComponent)"
         fileBrowserError = nil
         fileBrowserLoadingFiles.insert(filePath)
         sendFileReadAttempt(path: filePath, methodIndex: 0)
@@ -452,6 +480,18 @@ final class CodexConnection {
             kind: "initialize"
         )
         sendNotification(method: "initialized", params: [:])
+    }
+
+    private func refreshThread(_ threadId: String) {
+        guard isConnected else { return }
+        isLoadingThread = true
+        Self.logger.info("Refreshing turns thread=\(threadId, privacy: .public)")
+        diagnosticsStatus = "Refreshing transcript: \(Self.shortTimeString())"
+        sendRequest(
+            method: "thread/turns/list",
+            params: ["threadId": threadId],
+            kind: "thread/turns/list:\(threadId)"
+        )
     }
 
     private func receive(on socket: URLSessionWebSocketTask?) {
@@ -603,10 +643,14 @@ final class CodexConnection {
             lastError = nil
             startPingLoop()
             connectionState = .connected
+            Self.logger.info("Connected")
+            diagnosticsStatus = "Connected: \(Self.shortTimeString())"
             refreshThreads()
 
         case "thread/loaded/list":
             let ids = result["data"] as? [String] ?? []
+            Self.logger.info("Loaded thread ids count=\(ids.count, privacy: .public)")
+            diagnosticsStatus = "Loaded \(ids.count) threads"
             guard !ids.isEmpty else {
                 threads = []
                 saveCachedThreads()
@@ -661,11 +705,12 @@ final class CodexConnection {
                 }
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/turns/list:") == true {
-                loadHistoryFromTurns(
-                    result["data"] as? [[String: Any]]
-                        ?? result["turns"] as? [[String: Any]]
-                        ?? []
-                )
+                let turns = result["data"] as? [[String: Any]]
+                    ?? result["turns"] as? [[String: Any]]
+                    ?? []
+                Self.logger.info("Loaded turns count=\(turns.count, privacy: .public) kind=\(kind ?? "unknown", privacy: .public)")
+                diagnosticsStatus = "Loaded \(turns.count) turns: \(Self.shortTimeString())"
+                loadHistoryFromTurns(turns)
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/resume:") == true,
                       let thread = result["thread"] as? [String: Any],
@@ -882,7 +927,7 @@ final class CodexConnection {
 
     private func threadId(from kind: String?) -> String? {
         guard let kind else { return nil }
-        for prefix in ["thread/read:list:", "thread/read:", "thread/resume:"] {
+        for prefix in ["thread/read:list:", "thread/read:", "thread/resume:", "thread/turns/list:"] {
             if kind.hasPrefix(prefix) {
                 return String(kind.dropFirst(prefix.count))
             }
@@ -1227,6 +1272,13 @@ final class CodexConnection {
         return "\(minutes)m \(remainingSeconds)s"
     }
 
+    private static func shortTimeString(_ date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
+    }
+
     private func fileChangeTitle(from value: [String: Any]) -> String {
         let path = stringValue(for: ["path", "file", "filePath", "target", "targetPath"], in: value)
         guard let path, !path.isEmpty else { return "Changes" }
@@ -1462,6 +1514,7 @@ final class CodexConnection {
         guard methodIndex < methods.count else {
             fileBrowserLoadingPaths.remove(path)
             fileBrowserError = "File listing is not available from this app-server."
+            diagnosticsStatus = "File listing unavailable"
             return
         }
         let id = sendRequest(
@@ -1477,6 +1530,7 @@ final class CodexConnection {
         guard methodIndex < methods.count else {
             fileBrowserLoadingFiles.remove(path)
             fileBrowserError = "File reading is not available from this app-server."
+            diagnosticsStatus = "File reading unavailable"
             return
         }
         let id = sendRequest(
@@ -1493,6 +1547,7 @@ final class CodexConnection {
             if attempt.methodIndex >= 3 {
                 fileBrowserLoadingPaths.remove(attempt.path)
                 fileBrowserError = message
+                diagnosticsStatus = "Folder load failed: \(message)"
             }
             return true
         }
@@ -1501,6 +1556,7 @@ final class CodexConnection {
             if attempt.methodIndex >= 2 {
                 fileBrowserLoadingFiles.remove(attempt.path)
                 fileBrowserError = message
+                diagnosticsStatus = "File load failed: \(message)"
             }
             return true
         }
@@ -1512,12 +1568,14 @@ final class CodexConnection {
             let entries = remoteFileNodes(from: result, parentPath: attempt.path)
             fileBrowserEntriesByPath[attempt.path] = entries
             fileBrowserLoadingPaths.remove(attempt.path)
+            diagnosticsStatus = "Loaded \(entries.count) files: \(URL(fileURLWithPath: attempt.path).lastPathComponent)"
             return true
         }
         if let attempt = pendingFileReadAttempts.removeValue(forKey: id) {
             let document = remoteFileDocument(from: result, path: attempt.path)
             fileBrowserDocumentsByPath[attempt.path] = document
             fileBrowserLoadingFiles.remove(attempt.path)
+            diagnosticsStatus = "Loaded file: \(URL(fileURLWithPath: attempt.path).lastPathComponent)"
             return true
         }
         return false

@@ -2805,6 +2805,15 @@ struct CodexSettingsView: View {
                     }
                     .disabled(!codex.isConnected)
                 }
+
+                Section("Diagnostics") {
+                    LabeledContent("Build", value: CodexConnection.buildLabel)
+                    LabeledContent("State", value: String(describing: codex.connectionState))
+                    LabeledContent("Threads", value: "\(codex.threads.count)")
+                    Text(codex.diagnosticsStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
