@@ -786,7 +786,7 @@ final class CodexConnection {
                     || selectedThread?.status == "running"
                     || selectedThread?.status == "in_progress"
                 loadHistoryFromTurns(
-                    turns,
+                    chronologicalTurns(turns),
                     reset: entries.isEmpty,
                     showEmptyState: !selectedIsActive
                 )
@@ -975,7 +975,7 @@ final class CodexConnection {
             resetExplorationState()
             transcriptRevision += 1
         }
-        for turn in turns {
+        for turn in chronologicalTurns(turns) {
             let items = turn["items"] as? [[String: Any]] ?? []
             for item in items {
                 upsertItem(item, completed: true)
@@ -986,6 +986,24 @@ final class CodexConnection {
             append(.status, title: "No transcript", text: "This session has no loaded items yet.")
         }
         return !entries.isEmpty
+    }
+
+    private func chronologicalTurns(_ turns: [[String: Any]]) -> [[String: Any]] {
+        turns.enumerated().sorted { lhs, rhs in
+            let lhsStartedAt = Self.timestampValue(lhs.element["startedAt"])
+            let rhsStartedAt = Self.timestampValue(rhs.element["startedAt"])
+            switch (lhsStartedAt, rhsStartedAt) {
+            case let (lhsStartedAt?, rhsStartedAt?):
+                if lhsStartedAt == rhsStartedAt { return lhs.offset < rhs.offset }
+                return lhsStartedAt < rhsStartedAt
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     private func selectFreshThread(_ thread: CodexThreadSummary) {
@@ -1904,6 +1922,13 @@ final class CodexConnection {
         if let value = value as? Int { return value }
         if let value = value as? Double { return Int(value) }
         if let value = value as? String { return Int(value) }
+        return nil
+    }
+
+    private static func timestampValue(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? Int { return Double(value) }
+        if let value = value as? String { return Double(value) }
         return nil
     }
 

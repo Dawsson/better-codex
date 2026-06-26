@@ -366,11 +366,11 @@ function clientShouldReceive(client: ClientConnection, params: JsonObject) {
 setInterval(() => {
   deleteOldEvents.run({ $cutoff: now() - ttlMs });
   discoverActiveThreads();
-}, 60_000).unref();
+}, 60_000);
 
 connectUpstream();
 
-Bun.serve<ClientConnection>({
+const server = Bun.serve<ClientConnection>({
   hostname: listenHost,
   port: listenPort,
   fetch(request, server) {
@@ -413,5 +413,5 @@ Bun.serve<ClientConnection>({
   },
 });
 
-console.log(`Better Codex bridge listening on ws://${listenHost}:${listenPort}`);
+console.log(`Better Codex bridge listening on ws://${server.hostname}:${server.port}`);
 console.log(`Upstream Codex app-server: ${upstreamUrl}`);
