@@ -41,8 +41,14 @@ private struct FileReadAttempt {
 
 private struct TranscriptBackfillAttempt {
     let threadId: String
-    let turnId: String
+    let turnId: String?
     let path: String
+    let mode: TranscriptLoadMode
+}
+
+private enum TranscriptLoadMode: Equatable {
+    case full
+    case activeTurn
 }
 
 @Observable
@@ -524,6 +530,36 @@ final class CodexConnection {
         self.subscribedThreadId = nil
     }
 
+    private func requestFullTranscriptLoad(from thread: [String: Any]? = nil, threadId: String? = nil) -> Bool {
+        if let path = thread?["path"] as? String, !path.isEmpty {
+            activeThreadTranscriptPath = path
+        }
+        if let threadId {
+            activeThreadId = threadId
+        }
+
+        guard isConnected,
+              let activeThreadId,
+              let path = activeThreadTranscriptPath,
+              !pendingTranscriptBackfills.values.contains(where: { $0.threadId == activeThreadId && $0.path == path && $0.mode == .full }) else {
+            return false
+        }
+
+        let id = sendRequest(
+            method: "fs/readFile",
+            params: ["path": path],
+            kind: "transcript/full:\(activeThreadId)"
+        )
+        pendingTranscriptBackfills[id] = TranscriptBackfillAttempt(
+            threadId: activeThreadId,
+            turnId: nil,
+            path: path,
+            mode: .full
+        )
+        diagnosticsStatus = "Loading full transcript"
+        return true
+    }
+
     private func requestTranscriptBackfillIfPossible(from thread: [String: Any]? = nil, threadId: String? = nil) {
         if let path = thread?["path"] as? String, !path.isEmpty {
             activeThreadTranscriptPath = path
@@ -540,7 +576,7 @@ final class CodexConnection {
               let activeThreadId,
               let activeTurnId,
               let path = activeThreadTranscriptPath,
-              !pendingTranscriptBackfills.values.contains(where: { $0.turnId == activeTurnId && $0.path == path }) else {
+              !pendingTranscriptBackfills.values.contains(where: { $0.turnId == activeTurnId && $0.path == path && $0.mode == .activeTurn }) else {
             return
         }
 
@@ -552,7 +588,8 @@ final class CodexConnection {
         pendingTranscriptBackfills[id] = TranscriptBackfillAttempt(
             threadId: activeThreadId,
             turnId: activeTurnId,
-            path: path
+            path: path,
+            mode: .activeTurn
         )
         diagnosticsStatus = "Backfilling active turn"
     }
@@ -665,8 +702,11 @@ final class CodexConnection {
 
         if let error = message["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Codex request failed"
-            if pendingTranscriptBackfills.removeValue(forKey: id) != nil {
+            if let attempt = pendingTranscriptBackfills.removeValue(forKey: id) {
                 diagnosticsStatus = "Transcript backfill failed: \(errorMessage)"
+                if attempt.mode == .full, activeThreadId == attempt.threadId {
+                    refreshThread(attempt.threadId)
+                }
                 return
             }
             if handleFileRequestError(id: id, message: errorMessage) {
@@ -773,14 +813,15 @@ final class CodexConnection {
             } else if kind?.hasPrefix("thread/read:") == true,
                       let thread = result["thread"] as? [String: Any],
                       let threadId = threadId(from: kind) {
-                if entries.isEmpty, !loadHistory(from: thread, showEmptyState: false) {
+                if !requestFullTranscriptLoad(from: thread, threadId: threadId),
+                   entries.isEmpty,
+                   !loadHistory(from: thread, showEmptyState: false) {
                     sendRequest(
                         method: "thread/turns/list",
                         params: ["threadId": threadId],
                         kind: "thread/turns/list:\(threadId)"
                     )
                 }
-                requestTranscriptBackfillIfPossible(from: thread, threadId: threadId)
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/turns/list:") == true {
                 guard let threadId = threadId(from: kind) else { return }
@@ -822,8 +863,9 @@ final class CodexConnection {
                 selectedThread = summary
                 activeThreadId = summary.id
                 subscribedThreadId = summary.id
-                requestTranscriptBackfillIfPossible(from: thread, threadId: summary.id)
-                refreshThread(summary.id)
+                if !requestFullTranscriptLoad(from: thread, threadId: summary.id) {
+                    refreshThread(summary.id)
+                }
             }
         }
     }
@@ -1733,12 +1775,56 @@ final class CodexConnection {
         guard let attempt = pendingTranscriptBackfills.removeValue(forKey: id) else { return false }
         guard activeThreadId == attempt.threadId else { return true }
 
-        let jsonl = remoteText(from: result, maxCharacters: 2_000_000, keepTail: true)
-        let applied = backfillTranscript(from: jsonl, turnId: attempt.turnId)
-        diagnosticsStatus = applied > 0
-            ? "Backfilled \(applied) active items"
-            : "No active backfill items"
+        let jsonl = decodedRemoteText(from: result)
+        let applied: Int
+        switch attempt.mode {
+        case .full:
+            applied = loadFullTranscript(from: jsonl)
+            diagnosticsStatus = applied > 0
+                ? "Loaded \(applied) transcript items"
+                : "No transcript items"
+            if applied == 0 {
+                refreshThread(attempt.threadId)
+            }
+        case .activeTurn:
+            guard let turnId = attempt.turnId else { return true }
+            applied = backfillTranscript(from: jsonl, turnId: turnId)
+            diagnosticsStatus = applied > 0
+                ? "Backfilled \(applied) active items"
+                : "No active backfill items"
+        }
+        isLoadingThread = false
         return true
+    }
+
+    @discardableResult
+    private func loadFullTranscript(from jsonl: String) -> Int {
+        entries.removeAll()
+        entriesByItemId.removeAll()
+        resetExplorationState()
+        transcriptRevision += 1
+
+        var applied = 0
+        let lines = jsonl.split(separator: "\n", omittingEmptySubsequences: true)
+        for line in lines {
+            guard let data = line.data(using: .utf8),
+                  let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = record["type"] as? String,
+                  let payload = record["payload"] as? [String: Any] else {
+                continue
+            }
+
+            if type == "response_item", backfillResponseItem(payload) {
+                applied += 1
+            } else if type == "event_msg", backfillEventMessage(payload, turnId: nil) {
+                applied += 1
+            }
+        }
+        endActiveExplorationGroup()
+        if entries.isEmpty {
+            append(.status, title: "No transcript", text: "This session has no loaded items yet.")
+        }
+        return applied
     }
 
     @discardableResult
@@ -1774,8 +1860,11 @@ final class CodexConnection {
         switch type {
         case "message":
             let role = item["role"] as? String ?? "assistant"
+            guard role == "user" || role == "assistant" else { return false }
             let text = Self.responseContentText(item["content"] as? [[String: Any]] ?? [])
+            if role == "user", Self.isInjectedContextMessage(text) { return false }
             guard !text.isEmpty, let id = item["id"] as? String else { return false }
+            endActiveExplorationGroup()
             let entry = entriesByItemId[id] ?? append(role == "user" ? .user : .assistant, title: role == "user" ? "You" : "Codex", text: "", itemId: id)
             entry.text = text
             transcriptRevision += 1
@@ -1785,6 +1874,7 @@ final class CodexConnection {
             guard let callId = item["call_id"] as? String else { return false }
             let name = item["name"] as? String ?? "tool"
             let arguments = item["arguments"] as? String ?? ""
+            endActiveExplorationGroup()
             let entry = entriesByItemId[callId] ?? append(.command, title: "running", text: name, itemId: callId)
             entry.title = "running"
             entry.text = Self.displayBackfillCommand(name: name, arguments: arguments)
@@ -1808,6 +1898,7 @@ final class CodexConnection {
             guard let callId = item["call_id"] as? String else { return false }
             let name = item["name"] as? String ?? "tool"
             let input = item["input"] as? String ?? ""
+            endActiveExplorationGroup()
             if name == "apply_patch", !input.isEmpty {
                 let entry = entriesByItemId[callId] ?? append(.diff, title: "Patch", text: "Applied patch", itemId: callId)
                 entry.detail = input
@@ -1827,16 +1918,28 @@ final class CodexConnection {
             transcriptRevision += 1
             return true
 
+        case "reasoning":
+            let summaries = item["summary"] as? [[String: Any]] ?? []
+            let text = summaries.compactMap { summary -> String? in
+                summary["text"] as? String
+            }.joined(separator: "\n")
+            guard !text.isEmpty, let id = item["id"] as? String else { return false }
+            endActiveExplorationGroup()
+            let entry = entriesByItemId[id] ?? append(.status, title: "Reasoning", text: "", itemId: id)
+            entry.text = text
+            transcriptRevision += 1
+            return true
+
         default:
             return false
         }
     }
 
     @discardableResult
-    private func backfillEventMessage(_ payload: [String: Any], turnId: String) -> Bool {
+    private func backfillEventMessage(_ payload: [String: Any], turnId: String?) -> Bool {
         let payloadTurnId = payload["turn_id"] as? String
             ?? (payload["item"] as? [String: Any])?["turnId"] as? String
-        guard payloadTurnId == turnId else {
+        guard turnId == nil || payloadTurnId == turnId else {
             return false
         }
 
@@ -1872,13 +1975,21 @@ final class CodexConnection {
     }
 
     private static func displayBackfillCommand(name: String, arguments: String) -> String {
-        guard name == "exec_command",
+        let normalizedName = name.components(separatedBy: ".").last ?? name
+        guard normalizedName == "exec_command",
               let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let command = json["cmd"] as? String else {
             return arguments.isEmpty ? name : "\(name) \(arguments)"
         }
         return displayCommand(for: command)
+    }
+
+    private static func isInjectedContextMessage(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("# AGENTS.md instructions")
+            || trimmed.hasPrefix("<INSTRUCTIONS>")
+            || trimmed.hasPrefix("<environment_context>")
     }
 
     private func remoteFileNodes(from result: Any, parentPath: String) -> [RemoteFileNode] {
