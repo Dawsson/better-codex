@@ -782,59 +782,60 @@ struct RemoteDirectoryView: View {
     }
 
     var body: some View {
-        List {
+        ScrollView {
             if isLoadingRoot, rootEntries.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Loading files")
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             } else if visibleRows.isEmpty {
                 ContentUnavailableView(
                     searchText.isEmpty ? "No files" : "No matches",
                     systemImage: "folder",
                     description: Text(relativePath(path).isEmpty ? path : relativePath(path))
                 )
-                .listRowSeparator(.hidden)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
             } else {
-                ForEach(visibleRows) { row in
-                    if row.entry.isDirectory {
-                        Button {
-                            toggleDirectory(row.entry.path)
+                LazyVStack(spacing: 0) {
+                    ForEach(visibleRows) { row in
+                        if row.entry.isDirectory {
+                            Button {
+                                toggleDirectory(row.entry.path)
+                            }
+                            label: {
+                                RemoteFileRow(
+                                    entry: row.entry,
+                                    rootPath: rootPath,
+                                    depth: row.depth,
+                                    isExpanded: row.isExpanded,
+                                    isLoading: codex.fileBrowserLoadingPaths.contains(row.entry.path),
+                                    isSelected: false
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                activeFile = row.entry
+                            } label: {
+                                RemoteFileRow(
+                                    entry: row.entry,
+                                    rootPath: rootPath,
+                                    depth: row.depth,
+                                    isSelected: activeFile?.path == row.entry.path
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        label: {
-                            RemoteFileRow(
-                                entry: row.entry,
-                                rootPath: rootPath,
-                                depth: row.depth,
-                                isExpanded: row.isExpanded,
-                                isLoading: codex.fileBrowserLoadingPaths.contains(row.entry.path),
-                                isSelected: false
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .listRowSeparator(.hidden)
-                    } else {
-                        Button {
-                            activeFile = row.entry
-                        } label: {
-                            RemoteFileRow(
-                                entry: row.entry,
-                                rootPath: rootPath,
-                                depth: row.depth,
-                                isSelected: activeFile?.path == row.entry.path
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                        .listRowSeparator(.hidden)
                     }
                 }
+                .padding(.horizontal, 16)
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find file")
         .refreshable {
             codex.loadDirectory(path: path, force: true)
@@ -895,7 +896,7 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 6) {
             TreeIndentGuides(depth: depth)
 
             if isLoading {
