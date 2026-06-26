@@ -103,6 +103,7 @@ final class CodexConnection {
     private var pendingFileListAttempts: [Int: FileListAttempt] = [:]
     private var pendingFileReadAttempts: [Int: FileReadAttempt] = [:]
     private var pendingTranscriptBackfills: [Int: TranscriptBackfillAttempt] = [:]
+    private var pendingTurnPagesByThreadId: [String: [[String: Any]]] = [:]
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -321,7 +322,6 @@ final class CodexConnection {
         isLoadingThread = true
         pendingInput = nil
         clearQueuedTurns()
-        refreshThread(thread.id)
         sendRequest(
             method: "thread/resume",
             params: [
@@ -600,6 +600,7 @@ final class CodexConnection {
         requestKinds.removeAll()
         pendingFileListAttempts.removeAll()
         pendingFileReadAttempts.removeAll()
+        pendingTurnPagesByThreadId.removeAll()
         fileBrowserLoadingPaths.removeAll()
         fileBrowserLoadingFiles.removeAll()
         clearQueuedTurns()
@@ -687,6 +688,11 @@ final class CodexConnection {
                 finishLoadingAgent(threadId)
             }
             if kind?.hasPrefix("thread/read:") == true { isLoadingThread = false }
+            if kind?.hasPrefix("thread/turns/list:") == true,
+               let threadId = threadId(from: kind) {
+                pendingTurnPagesByThreadId.removeValue(forKey: threadId)
+                isLoadingThread = false
+            }
             if kind?.hasPrefix("thread/delete:") == true || kind?.hasPrefix("thread/name/set:") == true {
                 refreshThreads()
             }
@@ -777,21 +783,36 @@ final class CodexConnection {
                 requestTranscriptBackfillIfPossible(from: thread, threadId: threadId)
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/turns/list:") == true {
+                guard let threadId = threadId(from: kind) else { return }
                 let turns = result["data"] as? [[String: Any]]
                     ?? result["turns"] as? [[String: Any]]
                     ?? []
                 Self.logger.info("Loaded turns count=\(turns.count, privacy: .public) kind=\(kind ?? "unknown", privacy: .public)")
-                diagnosticsStatus = "Loaded \(turns.count) turns: \(Self.shortTimeString())"
+                var accumulatedTurns = pendingTurnPagesByThreadId[threadId] ?? []
+                accumulatedTurns.append(contentsOf: turns)
+                if let nextCursor = result["nextCursor"] as? String, !nextCursor.isEmpty {
+                    pendingTurnPagesByThreadId[threadId] = accumulatedTurns
+                    diagnosticsStatus = "Loaded \(accumulatedTurns.count) turns..."
+                    sendRequest(
+                        method: "thread/turns/list",
+                        params: ["threadId": threadId, "cursor": nextCursor],
+                        kind: "thread/turns/list:\(threadId)"
+                    )
+                    return
+                }
+
+                pendingTurnPagesByThreadId.removeValue(forKey: threadId)
+                diagnosticsStatus = "Loaded \(accumulatedTurns.count) turns: \(Self.shortTimeString())"
                 let selectedIsActive = selectedThread?.status == "active"
                     || selectedThread?.status == "running"
                     || selectedThread?.status == "in_progress"
                 loadHistoryFromTurns(
-                    chronologicalTurns(turns),
-                    reset: entries.isEmpty,
+                    accumulatedTurns,
+                    reset: true,
                     showEmptyState: !selectedIsActive
                 )
                 if selectedIsActive, activeTurnId == nil {
-                    activeTurnId = turns.first?["id"] as? String
+                    activeTurnId = newestTurn(in: accumulatedTurns)?["id"] as? String
                 }
                 requestTranscriptBackfillIfPossible()
                 isLoadingThread = false
@@ -1004,6 +1025,12 @@ final class CodexConnection {
                 return lhs.offset < rhs.offset
             }
         }.map(\.element)
+    }
+
+    private func newestTurn(in turns: [[String: Any]]) -> [String: Any]? {
+        turns.max { lhs, rhs in
+            (Self.timestampValue(lhs["startedAt"]) ?? 0) < (Self.timestampValue(rhs["startedAt"]) ?? 0)
+        }
     }
 
     private func selectFreshThread(_ thread: CodexThreadSummary) {
