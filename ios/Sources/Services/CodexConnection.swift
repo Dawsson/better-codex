@@ -329,7 +329,7 @@ final class CodexConnection {
         pendingInput = nil
         clearQueuedTurns()
         sendRequest(
-            method: "thread/resume",
+            method: "bridge/thread/resume",
             params: [
                 "threadId": thread.id,
                 "cwd": thread.cwd.isEmpty ? cwd : thread.cwd,
@@ -863,7 +863,9 @@ final class CodexConnection {
                 selectedThread = summary
                 activeThreadId = summary.id
                 subscribedThreadId = summary.id
-                if !requestFullTranscriptLoad(from: thread, threadId: summary.id) {
+                if loadBridgeTranscriptIfPresent(result) {
+                    isLoadingThread = false
+                } else if !requestFullTranscriptLoad(from: thread, threadId: summary.id) {
                     refreshThread(summary.id)
                 }
             }
@@ -1013,6 +1015,40 @@ final class CodexConnection {
         default:
             sendError(id: id, code: -32601, message: "Unsupported request: \(method)")
         }
+    }
+
+    @discardableResult
+    private func loadBridgeTranscriptIfPresent(_ result: [String: Any]) -> Bool {
+        guard let transcript = result["bridgeTranscript"] as? [String: Any],
+              let rawEntries = transcript["entries"] as? [[String: Any]] else {
+            return false
+        }
+
+        entries.removeAll()
+        entriesByItemId.removeAll()
+        resetExplorationState()
+        transcriptRevision += 1
+
+        for rawEntry in rawEntries {
+            guard let id = rawEntry["id"] as? String,
+                  let rawKind = rawEntry["kind"] as? String,
+                  let kind = CodexEntryKind(rawValue: rawKind) else {
+                continue
+            }
+            let entry = append(
+                kind,
+                title: rawEntry["title"] as? String ?? "",
+                text: rawEntry["text"] as? String ?? "",
+                itemId: id
+            )
+            entry.detail = rawEntry["detail"] as? String ?? ""
+        }
+
+        diagnosticsStatus = "Loaded \(entries.count) bridge transcript items"
+        if entries.isEmpty {
+            append(.status, title: "No transcript", text: "This session has no loaded items yet.")
+        }
+        return true
     }
 
     @discardableResult

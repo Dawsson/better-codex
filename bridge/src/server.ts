@@ -18,6 +18,17 @@ type PendingUpstreamRequest = {
   method: string;
   params: JsonObject;
   internal?: boolean;
+  bridgeResume?: {
+    threadId: string;
+  };
+};
+
+type TranscriptEntry = {
+  id: string;
+  kind: "user" | "assistant" | "command" | "exploration" | "output" | "status" | "error" | "tool" | "diff";
+  title: string;
+  text: string;
+  detail?: string;
 };
 
 type ClientConnection = {
@@ -179,6 +190,10 @@ function handleUpstreamMessage(message: RpcMessage) {
       handleInternalResponse(pending, message);
       return;
     }
+    if (pending.bridgeResume && pending.client) {
+      handleBridgeResumeResponse(pending, message);
+      return;
+    }
     if (pending.client) {
       send(pending.client.socket, {
         ...message,
@@ -196,6 +211,28 @@ function handleUpstreamMessage(message: RpcMessage) {
       }
     }
   }
+}
+
+function handleBridgeResumeResponse(pending: PendingUpstreamRequest, message: RpcMessage) {
+  const client = pending.client;
+  if (!client) return;
+  if (message.error) {
+    send(client.socket, { ...message, id: pending.clientRequestId });
+    return;
+  }
+  const result = isObject(message.result) ? message.result : {};
+  const thread = isObject(result.thread) ? result.thread : {};
+  const entries = transcriptEntriesForThread(thread);
+  send(client.socket, {
+    id: pending.clientRequestId,
+    result: {
+      ...result,
+      bridgeTranscript: {
+        entries,
+        source: stringValue(thread.path) ?? "",
+      },
+    },
+  });
 }
 
 function handleInternalResponse(pending: PendingUpstreamRequest, message: RpcMessage) {
@@ -301,6 +338,41 @@ function handleClientMessage(client: ClientConnection, message: RpcMessage) {
   const params = message.params ?? {};
   client.pending.set(message.id, { method: message.method, params });
 
+  if (message.method === "bridge/thread/resume") {
+    const threadId = stringValue(params.threadId);
+    const cwd = stringValue(params.cwd) ?? "";
+    if (!threadId) {
+      send(client.socket, {
+        id: message.id,
+        error: { code: -32602, message: "Missing threadId" },
+      });
+      return;
+    }
+    client.threadIds.add(threadId);
+    subscribeThread(threadId, cwd);
+    try {
+      sendUpstream(
+        "thread/resume",
+        {
+          threadId,
+          cwd,
+          approvalPolicy: params.approvalPolicy ?? "never",
+          sandbox: params.sandbox ?? "danger-full-access",
+        },
+        { client, clientRequestId: message.id, bridgeResume: { threadId } },
+      );
+    } catch (error) {
+      send(client.socket, {
+        id: message.id,
+        error: {
+          code: -32000,
+          message: error instanceof Error ? error.message : "Bridge upstream unavailable",
+        },
+      });
+    }
+    return;
+  }
+
   if (message.method === "thread/resume") {
     const threadId = stringValue(params.threadId);
     const cwd = stringValue(params.cwd) ?? "";
@@ -324,6 +396,155 @@ function handleClientMessage(client: ClientConnection, message: RpcMessage) {
       },
     });
   }
+}
+
+function transcriptEntriesForThread(thread: JsonObject): TranscriptEntry[] {
+  const path = stringValue(thread.path);
+  if (!path || !existsSync(path)) return [];
+
+  const entries: TranscriptEntry[] = [];
+  const entriesById = new Map<string, TranscriptEntry>();
+  let lineNumber = 0;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    lineNumber += 1;
+    if (!line.trim()) continue;
+    const record = parseJson(line);
+    if (!record || record.type !== "response_item" || !isObject(record.payload)) continue;
+    appendResponseItem(entries, entriesById, record.payload, lineNumber);
+  }
+  return entries;
+}
+
+function appendResponseItem(entries: TranscriptEntry[], entriesById: Map<string, TranscriptEntry>, item: JsonObject, lineNumber: number) {
+  const type = stringValue(item.type);
+  if (!type) return;
+
+  if (type === "message") {
+    const role = stringValue(item.role) ?? "assistant";
+    if (role !== "user" && role !== "assistant") return;
+    const text = responseContentText(Array.isArray(item.content) ? item.content : []);
+    if (!text || (role === "user" && isInjectedContextMessage(text))) return;
+    const id = stringValue(item.id) ?? `jsonl-${lineNumber}-message`;
+    upsertEntry(entries, entriesById, id, {
+      id,
+      kind: role === "user" ? "user" : "assistant",
+      title: role === "user" ? "You" : "Codex",
+      text,
+    });
+    return;
+  }
+
+  if (type === "function_call") {
+    const callId = stringValue(item.call_id);
+    if (!callId) return;
+    const name = stringValue(item.name) ?? "tool";
+    const args = stringValue(item.arguments) ?? "";
+    upsertEntry(entries, entriesById, callId, {
+      id: callId,
+      kind: "command",
+      title: "running",
+      text: displayBackfillCommand(name, args),
+    });
+    return;
+  }
+
+  if (type === "function_call_output") {
+    const callId = stringValue(item.call_id);
+    if (!callId) return;
+    const output = stringValue(item.output) ?? "";
+    const existing = entriesById.get(callId);
+    if (existing) {
+      existing.title = "completed";
+      existing.detail = output;
+    } else {
+      upsertEntry(entries, entriesById, `output-${callId}`, {
+        id: `output-${callId}`,
+        kind: "output",
+        title: "Output",
+        text: output,
+      });
+    }
+    return;
+  }
+
+  if (type === "custom_tool_call") {
+    const callId = stringValue(item.call_id);
+    if (!callId) return;
+    const name = stringValue(item.name) ?? "tool";
+    const input = stringValue(item.input) ?? "";
+    upsertEntry(entries, entriesById, callId, {
+      id: callId,
+      kind: name === "apply_patch" ? "diff" : "tool",
+      title: name === "apply_patch" ? "Patch" : name,
+      text: name === "apply_patch" ? "Applied patch" : input,
+      detail: name === "apply_patch" ? input : "",
+    });
+    return;
+  }
+
+  if (type === "custom_tool_call_output") {
+    const callId = stringValue(item.call_id);
+    if (!callId) return;
+    const existing = entriesById.get(callId);
+    const output = stringValue(item.output) ?? "";
+    if (existing && output) existing.detail = output;
+    return;
+  }
+
+  if (type === "reasoning") {
+    const id = stringValue(item.id);
+    if (!id) return;
+    const summary = Array.isArray(item.summary)
+      ? item.summary.map((part) => isObject(part) ? stringValue(part.text) ?? "" : "").filter(Boolean).join("\n")
+      : "";
+    if (!summary) return;
+    upsertEntry(entries, entriesById, id, {
+      id,
+      kind: "status",
+      title: "Reasoning",
+      text: summary,
+    });
+  }
+}
+
+function upsertEntry(entries: TranscriptEntry[], entriesById: Map<string, TranscriptEntry>, id: string, next: TranscriptEntry) {
+  const existing = entriesById.get(id);
+  if (existing) {
+    Object.assign(existing, next);
+    return existing;
+  }
+  entriesById.set(id, next);
+  entries.push(next);
+  return next;
+}
+
+function responseContentText(content: unknown[]) {
+  return content
+    .map((part) => isObject(part) && ["output_text", "input_text", "text"].includes(String(part.type)) ? stringValue(part.text) ?? "" : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isInjectedContextMessage(text: string) {
+  const trimmed = text.trim();
+  return trimmed.startsWith("# AGENTS.md instructions")
+    || trimmed.startsWith("<INSTRUCTIONS>")
+    || trimmed.startsWith("<environment_context>");
+}
+
+function displayBackfillCommand(name: string, args: string) {
+  const normalizedName = name.split(".").at(-1) ?? name;
+  if (normalizedName !== "exec_command") return args ? `${name} ${args}` : name;
+  try {
+    const parsed = JSON.parse(args) as { cmd?: unknown };
+    return typeof parsed.cmd === "string" ? displayCommand(parsed.cmd) : name;
+  } catch {
+    return name;
+  }
+}
+
+function displayCommand(command: string) {
+  return command.trim().replace(/\s+/g, " ");
 }
 
 function authorized(request: Request) {
