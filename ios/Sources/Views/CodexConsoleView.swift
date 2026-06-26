@@ -1688,6 +1688,7 @@ struct ExplorationDisplayItem {
 struct CommandRunView: View {
     @Bindable var entry: CodexEntry
     private let previewLimit = 4
+    private let expandedOutputLimit = 28_000
 
     var body: some View {
         Group {
@@ -1695,7 +1696,7 @@ struct CommandRunView: View {
                 commandLabel
             } else {
                 DisclosureGroup(isExpanded: $entry.isExpanded) {
-                    CodeBlockView(text: entry.detail)
+                    CommandOutputBlock(text: entry.detail, maxCharacters: expandedOutputLimit)
                         .padding(.top, 8)
                 } label: {
                     commandLabel
@@ -1726,6 +1727,41 @@ struct CommandRunView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+struct CommandOutputBlock: View {
+    let text: String
+    let maxCharacters: Int
+
+    private var isTruncated: Bool {
+        text.count > maxCharacters
+    }
+
+    private var visibleText: String {
+        guard isTruncated else { return text }
+        return String(text.prefix(maxCharacters))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(visibleText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .textSelection(.enabled)
+                    .padding(10)
+            }
+
+            if isTruncated {
+                Text("Showing first \(maxCharacters.formatted()) characters of \(text.count.formatted()).")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+            }
+        }
+        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
