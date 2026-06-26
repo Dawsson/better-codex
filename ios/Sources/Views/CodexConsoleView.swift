@@ -811,7 +811,7 @@ struct RemoteDirectoryView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
                         .listRowSeparator(.hidden)
                     } else {
                         NavigationLink {
@@ -832,7 +832,7 @@ struct RemoteDirectoryView: View {
                         .simultaneousGesture(TapGesture().onEnded {
                             selectedPath = row.entry.path
                         })
-                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
                         .listRowSeparator(.hidden)
                     }
                 }
@@ -854,6 +854,11 @@ struct RemoteDirectoryView: View {
         }
         .onAppear {
             codex.loadDirectory(path: path)
+        }
+        .onChange(of: codex.isConnected) { _, isConnected in
+            if isConnected {
+                codex.loadDirectory(path: path)
+            }
         }
     }
 
@@ -887,30 +892,30 @@ struct RemoteFileRow: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 5) {
             TreeIndentGuides(depth: depth)
 
             if entry.isDirectory {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 10)
+                    .frame(width: 9)
             } else {
                 Color.clear
-                    .frame(width: 10)
+                    .frame(width: 9)
             }
 
             if isLoading {
                 ProgressView()
                     .controlSize(.mini)
-                    .frame(width: 18)
+                    .frame(width: 20)
             } else {
                 FileIcon(path: entry.path, isDirectory: entry.isDirectory, isExpanded: isExpanded)
-                    .frame(width: 18)
+                    .frame(width: 20)
             }
 
             Text(entry.name)
-                .font(.callout.weight(entry.isDirectory ? .medium : .regular))
+                .font(.subheadline.weight(entry.isDirectory ? .medium : .regular))
                 .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                 .lineLimit(1)
 
@@ -923,8 +928,8 @@ struct RemoteFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
@@ -943,12 +948,12 @@ struct TreeIndentGuides: View {
         HStack(spacing: 0) {
             ForEach(0..<depth, id: \.self) { _ in
                 Rectangle()
-                    .fill(Color.secondary.opacity(0.18))
+                    .fill(Color.secondary.opacity(0.12))
                     .frame(width: 1)
-                    .frame(width: 13, alignment: .center)
+                    .frame(width: 11, alignment: .center)
             }
         }
-        .frame(width: CGFloat(depth) * 13)
+        .frame(width: CGFloat(depth) * 11)
     }
 }
 
@@ -957,52 +962,77 @@ struct FileIcon: View {
     let isDirectory: Bool
     let isExpanded: Bool
 
-    private var symbol: String {
-        if isDirectory { return isExpanded ? "folder.fill" : "folder" }
+    private var metadata: FileIconMetadata {
+        if isDirectory {
+            return FileIconMetadata(label: nil, symbol: isExpanded ? "folder.fill" : "folder", foreground: .blue, background: .clear)
+        }
         let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        if ["package.json", "bun.lock", "pnpm-lock.yaml", "yarn.lock"].contains(name) { return "shippingbox.fill" }
-        if ["env", "env.local", "env.dev", "env.production"].contains(ext) || name.hasPrefix(".env") { return "key.fill" }
-        switch ext {
-        case "swift": return "swift"
-        case "ts", "tsx", "js", "jsx", "mjs", "cjs": return "curlybraces.square.fill"
-        case "json", "jsonc": return "braces"
-        case "md", "mdx", "markdown": return "doc.richtext.fill"
-        case "yml", "yaml", "toml": return "slider.horizontal.3"
-        case "css", "scss", "sass": return "paintpalette.fill"
-        case "html", "htm": return "chevron.left.forwardslash.chevron.right"
-        case "png", "jpg", "jpeg", "gif", "webp", "svg": return "photo.fill"
-        case "sql": return "cylinder.split.1x2.fill"
-        case "sh", "bash", "zsh": return "terminal.fill"
-        case "lock": return "lock.doc.fill"
-        default: return "doc.text"
+        if name == "package.json" { return FileIconMetadata(label: "N", symbol: nil, foreground: .red, background: .red.opacity(0.18)) }
+        if ["bun.lock", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"].contains(name) {
+            return FileIconMetadata(label: nil, symbol: "lock.fill", foreground: .orange, background: .orange.opacity(0.15))
         }
-    }
-
-    private var color: Color {
-        if isDirectory { return .blue }
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        if name.hasPrefix(".env") {
+            return FileIconMetadata(label: nil, symbol: "key.fill", foreground: .yellow, background: .yellow.opacity(0.16))
+        }
+        if ["dockerfile", "docker-compose.yml", "docker-compose.yaml"].contains(name) {
+            return FileIconMetadata(label: nil, symbol: "shippingbox.fill", foreground: .cyan, background: .cyan.opacity(0.16))
+        }
         switch ext {
-        case "swift": return .orange
-        case "ts", "tsx": return .blue
-        case "js", "jsx", "mjs", "cjs": return .yellow
-        case "json", "jsonc": return .green
-        case "md", "mdx", "markdown": return .mint
-        case "yml", "yaml", "toml": return .purple
-        case "css", "scss", "sass": return .pink
-        case "html", "htm": return .red
-        case "png", "jpg", "jpeg", "gif", "webp", "svg": return .teal
-        case "sql": return .indigo
-        case "sh", "bash", "zsh": return .secondary
-        default: return .secondary
+        case "tsx", "jsx":
+            return FileIconMetadata(label: nil, symbol: "atom", foreground: .cyan, background: .cyan.opacity(0.14))
+        case "ts":
+            return FileIconMetadata(label: "TS", symbol: nil, foreground: .blue, background: .blue.opacity(0.20))
+        case "js", "mjs", "cjs":
+            return FileIconMetadata(label: "JS", symbol: nil, foreground: .yellow, background: .yellow.opacity(0.18))
+        case "swift":
+            return FileIconMetadata(label: nil, symbol: "swift", foreground: .orange, background: .orange.opacity(0.14))
+        case "css", "scss", "sass":
+            return FileIconMetadata(label: "CSS", symbol: nil, foreground: .purple, background: .purple.opacity(0.22))
+        case "html", "htm":
+            return FileIconMetadata(label: "H", symbol: nil, foreground: .red, background: .red.opacity(0.18))
+        case "json", "jsonc":
+            return FileIconMetadata(label: "{ }", symbol: nil, foreground: .green, background: .green.opacity(0.17))
+        case "md", "mdx", "markdown":
+            return FileIconMetadata(label: "MD", symbol: nil, foreground: .mint, background: .mint.opacity(0.17))
+        case "yml", "yaml", "toml":
+            return FileIconMetadata(label: "Y", symbol: nil, foreground: .purple, background: .purple.opacity(0.17))
+        case "sql":
+            return FileIconMetadata(label: nil, symbol: "cylinder.split.1x2.fill", foreground: .indigo, background: .indigo.opacity(0.16))
+        case "sh", "bash", "zsh":
+            return FileIconMetadata(label: nil, symbol: "terminal.fill", foreground: .secondary, background: .secondary.opacity(0.12))
+        case "png", "jpg", "jpeg", "gif", "webp", "svg":
+            return FileIconMetadata(label: nil, symbol: "photo.fill", foreground: .teal, background: .teal.opacity(0.14))
+        default:
+            return FileIconMetadata(label: nil, symbol: "doc.text", foreground: .secondary, background: .clear)
         }
     }
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.caption.weight(isDirectory ? .regular : .medium))
-            .foregroundStyle(color)
+        let metadata = metadata
+        ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(metadata.background)
+                .frame(width: 20, height: 18)
+            if let label = metadata.label {
+                Text(label)
+                    .font(.system(size: label.count > 2 ? 7 : 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(metadata.foreground)
+                    .minimumScaleFactor(0.7)
+            } else if let symbol = metadata.symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: isDirectory ? 13 : 11, weight: .semibold))
+                    .foregroundStyle(metadata.foreground)
+            }
+        }
     }
+}
+
+private struct FileIconMetadata {
+    let label: String?
+    let symbol: String?
+    let foreground: Color
+    let background: Color
 }
 
 struct RemoteCodeViewer: View {
@@ -1079,6 +1109,11 @@ struct RemoteCodeViewer: View {
         }
         .onAppear {
             codex.loadFile(path: path)
+        }
+        .onChange(of: codex.isConnected) { _, isConnected in
+            if isConnected {
+                codex.loadFile(path: path)
+            }
         }
     }
 

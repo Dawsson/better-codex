@@ -319,7 +319,9 @@ final class CodexConnection {
     func loadDirectory(path: String? = nil, force: Bool = false) {
         let directoryPath = normalizedFilePath(path ?? selectedThread?.cwd ?? cwd)
         guard isConnected else {
-            fileBrowserError = "Connect to Codex before browsing files."
+            fileBrowserError = nil
+            fileBrowserLoadingPaths.insert(directoryPath)
+            reconnectIfNeeded()
             return
         }
         guard force || fileBrowserEntriesByPath[directoryPath] == nil else { return }
@@ -331,7 +333,9 @@ final class CodexConnection {
     func loadFile(path: String, force: Bool = false) {
         let filePath = normalizedFilePath(path)
         guard isConnected else {
-            fileBrowserError = "Connect to Codex before opening files."
+            fileBrowserError = nil
+            fileBrowserLoadingFiles.insert(filePath)
+            reconnectIfNeeded()
             return
         }
         guard force || fileBrowserDocumentsByPath[filePath] == nil else { return }
