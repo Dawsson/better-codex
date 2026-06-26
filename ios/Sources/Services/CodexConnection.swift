@@ -47,7 +47,7 @@ private struct TranscriptBackfillAttempt {
 
 @Observable
 final class CodexConnection {
-    static let defaultServerURL = "ws://100.108.73.69:8876"
+    static let defaultServerURL = "ws://100.108.73.69:8877"
     static let defaultCwd = "/Users/dawson/projects/hosting-platform"
     static let buildLabel = "2026-06-25-live-refresh"
     private static let cachedThreadsKey = "codex_cached_threads"
@@ -111,7 +111,13 @@ final class CodexConnection {
 
     init() {
         let defaults = UserDefaults.standard
-        serverURL = defaults.string(forKey: "codex_server_url") ?? Self.defaultServerURL
+        let savedServerURL = defaults.string(forKey: "codex_server_url")
+        serverURL = savedServerURL == "ws://100.108.73.69:8876"
+            ? Self.defaultServerURL
+            : savedServerURL ?? Self.defaultServerURL
+        if savedServerURL == "ws://100.108.73.69:8876" {
+            defaults.set(Self.defaultServerURL, forKey: "codex_server_url")
+        }
         bearerToken = defaults.string(forKey: "codex_bearer_token") ?? ""
         cwd = defaults.string(forKey: "codex_cwd") ?? Self.defaultCwd
         hiddenThreadIds = Self.loadHiddenThreadIds(from: defaults)

@@ -1,0 +1,13 @@
+{
+  "name": "better-codex",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bridge": "bun bridge/src/server.ts",
+    "bridge:check": "tsc --noEmit -p bridge/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.3"
+  }
+}

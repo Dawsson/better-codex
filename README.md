@@ -15,11 +15,14 @@ sessions feel calm, readable, and useful on mobile.
 - Formats assistant Markdown, command runs, read/search exploration, and output
   previews for small screens.
 - Sends new messages back to the active Codex session.
-- Works best over Tailscale with a Mac-hosted Codex app-server.
+- Works best over Tailscale with the Mac-hosted Better Codex bridge in front of
+  Codex app-server.
 
 ## Layout
 
 - `ios/` - SwiftUI iOS app.
+- `bridge/` - Bun bridge that keeps persistent Codex app-server subscriptions
+  and stores replayable active-thread events in SQLite.
 
 ## Build The iOS App
 
