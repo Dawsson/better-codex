@@ -27,15 +27,6 @@ type ClientConnection = {
   threadIds: Set<string>;
 };
 
-type StoredEvent = {
-  id: number;
-  thread_id: string;
-  turn_id: string | null;
-  method: string;
-  params_json: string;
-  created_at_ms: number;
-};
-
 const env = Bun.env;
 const listenHost = env.BETTER_CODEX_BRIDGE_HOST ?? "0.0.0.0";
 const listenPort = Number(env.BETTER_CODEX_BRIDGE_PORT ?? "8877");
@@ -90,14 +81,6 @@ const upsertSubscription = db.query(`
     updated_at_ms = excluded.updated_at_ms
 `);
 const activeSubscriptions = db.query("SELECT thread_id, cwd FROM subscriptions WHERE status = 'active'");
-const selectReplayEvents = db.query(`
-  SELECT id, thread_id, turn_id, method, params_json, created_at_ms
-  FROM events
-  WHERE thread_id = $threadId AND created_at_ms >= $cutoff
-  ORDER BY id ASC
-  LIMIT $limit
-`);
-
 let nextClientId = 1;
 let nextUpstreamId = 1;
 let upstream: WebSocket | undefined;
@@ -201,10 +184,6 @@ function handleUpstreamMessage(message: RpcMessage) {
         ...message,
         id: pending.clientRequestId,
       });
-      if (pending.method === "thread/resume" && !message.error) {
-        const threadId = stringValue(pending.params.threadId);
-        if (threadId) replayThreadToClient(pending.client, threadId);
-      }
     }
     return;
   }
@@ -295,20 +274,6 @@ function storeNotification(method: string, params: JsonObject) {
       $updatedAtMs: now(),
     });
     subscribedThreads.delete(threadId);
-  }
-}
-
-function replayThreadToClient(client: ClientConnection, threadId: string) {
-  const events = selectReplayEvents.all({
-    $threadId: threadId,
-    $cutoff: now() - ttlMs,
-    $limit: 5_000,
-  }) as StoredEvent[];
-  for (const event of events) {
-    send(client.socket, {
-      method: event.method,
-      params: JSON.parse(event.params_json) as JsonObject,
-    });
   }
 }
 

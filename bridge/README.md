@@ -2,7 +2,8 @@
 
 The bridge is a protocol-compatible WebSocket proxy for Codex app-server. It
 keeps persistent subscriptions open for active threads, stores live events in
-SQLite, and replays recent events to mobile clients when they resume a thread.
+SQLite for diagnostics/TTL retention, and lets mobile clients fetch current
+thread history directly from Codex app-server before receiving live updates.
 
 ## Run
 
