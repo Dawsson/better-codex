@@ -275,6 +275,11 @@ final class CodexConnection {
         pendingInput = nil
         clearQueuedTurns()
         sendRequest(
+            method: "thread/turns/list",
+            params: ["threadId": thread.id],
+            kind: "thread/turns/list:\(thread.id)"
+        )
+        sendRequest(
             method: "thread/read",
             params: ["threadId": thread.id, "includeTurns": true],
             kind: "thread/read:\(thread.id)"
@@ -643,7 +648,7 @@ final class CodexConnection {
             } else if kind?.hasPrefix("thread/read:") == true,
                       let thread = result["thread"] as? [String: Any],
                       let threadId = threadId(from: kind) {
-                if !loadHistory(from: thread, showEmptyState: false) {
+                if entries.isEmpty, !loadHistory(from: thread, showEmptyState: false) {
                     sendRequest(
                         method: "thread/turns/list",
                         params: ["threadId": threadId],
@@ -652,7 +657,11 @@ final class CodexConnection {
                 }
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/turns/list:") == true {
-                loadHistoryFromTurns(result["data"] as? [[String: Any]] ?? [])
+                loadHistoryFromTurns(
+                    result["data"] as? [[String: Any]]
+                        ?? result["turns"] as? [[String: Any]]
+                        ?? []
+                )
                 isLoadingThread = false
             } else if kind?.hasPrefix("thread/resume:") == true,
                       let thread = result["thread"] as? [String: Any],

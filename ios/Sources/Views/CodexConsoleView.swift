@@ -735,26 +735,53 @@ struct RemoteDirectoryView: View {
     let rootPath: String
     @Binding var references: [CodeReferenceSnippet]
     @State private var searchText = ""
+    @State private var expandedPaths: Set<String> = []
 
-    private var entries: [RemoteFileNode] {
-        let values = codex.fileBrowserEntriesByPath[path] ?? []
+    private var rootEntries: [RemoteFileNode] {
+        codex.fileBrowserEntriesByPath[path] ?? []
+    }
+
+    private var visibleRows: [RemoteFileTreeRow] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return values }
-        return values.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-                || $0.path.localizedCaseInsensitiveContains(query)
+        var rows: [RemoteFileTreeRow] = []
+        appendRows(from: path, depth: 0, query: query, rows: &rows)
+        return rows
+    }
+
+    private var isLoadingRoot: Bool {
+        codex.fileBrowserLoadingPaths.contains(path)
+    }
+
+    private func appendRows(
+        from directoryPath: String,
+        depth: Int,
+        query: String,
+        rows: inout [RemoteFileTreeRow]
+    ) {
+        let entries = codex.fileBrowserEntriesByPath[directoryPath] ?? []
+        for entry in entries {
+            let matches = query.isEmpty
+                || entry.name.localizedCaseInsensitiveContains(query)
+                || entry.path.localizedCaseInsensitiveContains(query)
+            let isExpanded = expandedPaths.contains(entry.path)
+            if matches {
+                rows.append(RemoteFileTreeRow(entry: entry, depth: depth, isExpanded: isExpanded))
+            }
+            if entry.isDirectory, isExpanded || !query.isEmpty {
+                appendRows(from: entry.path, depth: depth + 1, query: query, rows: &rows)
+            }
         }
     }
 
     var body: some View {
         List {
-            if codex.fileBrowserLoadingPaths.contains(path), entries.isEmpty {
+            if isLoadingRoot, rootEntries.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Loading files")
                         .foregroundStyle(.secondary)
                 }
-            } else if entries.isEmpty {
+            } else if visibleRows.isEmpty {
                 ContentUnavailableView(
                     searchText.isEmpty ? "No files" : "No matches",
                     systemImage: "folder",
@@ -762,28 +789,31 @@ struct RemoteDirectoryView: View {
                 )
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(entries) { entry in
-                    if entry.isDirectory {
-                        NavigationLink {
-                            RemoteDirectoryView(
-                                path: entry.path,
-                                rootPath: rootPath,
-                                references: $references
-                            )
-                            .environment(codex)
-                        } label: {
-                            RemoteFileRow(entry: entry, rootPath: rootPath)
+                ForEach(visibleRows) { row in
+                    if row.entry.isDirectory {
+                        Button {
+                            toggleDirectory(row.entry.path)
                         }
+                        label: {
+                            RemoteFileRow(
+                                entry: row.entry,
+                                rootPath: rootPath,
+                                depth: row.depth,
+                                isExpanded: row.isExpanded,
+                                isLoading: codex.fileBrowserLoadingPaths.contains(row.entry.path)
+                            )
+                        }
+                        .buttonStyle(.plain)
                     } else {
                         NavigationLink {
                             RemoteCodeViewer(
-                                path: entry.path,
+                                path: row.entry.path,
                                 rootPath: rootPath,
                                 references: $references
                             )
                             .environment(codex)
                         } label: {
-                            RemoteFileRow(entry: entry, rootPath: rootPath)
+                            RemoteFileRow(entry: row.entry, rootPath: rootPath, depth: row.depth)
                         }
                     }
                 }
@@ -809,21 +839,59 @@ struct RemoteDirectoryView: View {
         }
     }
 
+    private func toggleDirectory(_ directoryPath: String) {
+        if expandedPaths.contains(directoryPath) {
+            expandedPaths.remove(directoryPath)
+        } else {
+            expandedPaths.insert(directoryPath)
+            codex.loadDirectory(path: directoryPath)
+        }
+    }
+
     private func relativePath(_ value: String) -> String {
         value.relativePath(from: rootPath)
     }
 }
 
+private struct RemoteFileTreeRow: Identifiable {
+    var id: String { entry.path }
+    let entry: RemoteFileNode
+    let depth: Int
+    let isExpanded: Bool
+}
+
 struct RemoteFileRow: View {
     let entry: RemoteFileNode
     let rootPath: String
+    var depth = 0
+    var isExpanded = false
+    var isLoading = false
 
     var body: some View {
         HStack(spacing: 11) {
-            Image(systemName: entry.iconName)
-                .font(.body)
-                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
-                .frame(width: 22)
+            Color.clear
+                .frame(width: CGFloat(depth) * 16)
+
+            if entry.isDirectory {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+            } else {
+                Color.clear
+                    .frame(width: 12)
+            }
+
+            if isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 22)
+            } else {
+                Image(systemName: entry.iconName)
+                    .font(.body)
+                    .foregroundStyle(entry.isDirectory ? .blue : .secondary)
+                    .frame(width: 22)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
